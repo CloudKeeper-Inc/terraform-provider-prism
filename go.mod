@@ -1,4 +1,4 @@
-module github.com/cloudkeeper/terraform-provider-cloudkeeper
+module github.com/CloudKeeper-Inc/terraform-provider-prism
 
 go 1.24.0
 

@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	"github.com/cloudkeeper/terraform-provider-cloudkeeper/internal/provider"
+	"github.com/CloudKeeper-Inc/terraform-provider-prism/internal/provider"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/cloudkeeper/cloudkeeper",
+		Address: "registry.terraform.io/cloudkeeper/prism",
 		Debug:   debug,
 	}
 

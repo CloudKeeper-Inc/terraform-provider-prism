@@ -37,7 +37,7 @@ func New(version string) func() provider.Provider {
 
 // Metadata returns the provider type name.
 func (p *CloudKeeperProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
-	resp.TypeName = "cloudkeeper"
+	resp.TypeName = "prism"
 	resp.Version = p.version
 }
 
@@ -48,11 +48,11 @@ func (p *CloudKeeperProvider) Schema(ctx context.Context, req provider.SchemaReq
 			"The provider needs to be configured with the proper credentials before it can be used.",
 		Attributes: map[string]schema.Attribute{
 			"prism_subdomain": schema.StringAttribute{
-				MarkdownDescription: "The Prism subdomain for CloudKeeper API paths. Can also be set via the `CLOUDKEEPER_PRISM_SUBDOMAIN` environment variable.",
+				MarkdownDescription: "The Prism subdomain for CloudKeeper API paths. Can also be set via the `PRISM_SUBDOMAIN` environment variable.",
 				Optional:            true,
 			},
 			"api_token": schema.StringAttribute{
-				MarkdownDescription: "The API token for authentication with CloudKeeper. Can also be set via the `CLOUDKEEPER_API_TOKEN` environment variable.",
+				MarkdownDescription: "The API token for authentication with CloudKeeper. Can also be set via the `PRISM_API_TOKEN` environment variable.",
 				Optional:            true,
 				Sensitive:           true,
 			},
@@ -80,7 +80,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 			path.Root("prism_subdomain"),
 			"Unknown CloudKeeper Prism Subdomain",
 			"The provider cannot create the CloudKeeper API client as there is an unknown configuration value for the CloudKeeper Prism subdomain. "+
-				"Either target apply the source of the value first, set the value statically in the configuration, or use the CLOUDKEEPER_PRISM_SUBDOMAIN environment variable.",
+				"Either target apply the source of the value first, set the value statically in the configuration, or use the PRISM_SUBDOMAIN environment variable.",
 		)
 	}
 
@@ -89,7 +89,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 			path.Root("api_token"),
 			"Unknown CloudKeeper API Token",
 			"The provider cannot create the CloudKeeper API client as there is an unknown configuration value for the CloudKeeper API token. "+
-				"Either target apply the source of the value first, set the value statically in the configuration, or use the CLOUDKEEPER_API_TOKEN environment variable.",
+				"Either target apply the source of the value first, set the value statically in the configuration, or use the PRISM_API_TOKEN environment variable.",
 		)
 	}
 
@@ -100,8 +100,8 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 	// Default values to environment variables, but override
 	// with Terraform configuration value if set.
 
-	prismSubdomain := os.Getenv("CLOUDKEEPER_PRISM_SUBDOMAIN")
-	apiToken := os.Getenv("CLOUDKEEPER_API_TOKEN")
+	prismSubdomain := os.Getenv("PRISM_SUBDOMAIN")
+	apiToken := os.Getenv("PRISM_API_TOKEN")
 
 	if !data.PrismSubdomain.IsNull() {
 		prismSubdomain = data.PrismSubdomain.ValueString()
@@ -119,7 +119,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 			path.Root("prism_subdomain"),
 			"Missing CloudKeeper Prism Subdomain",
 			"The provider cannot create the CloudKeeper API client as there is a missing or empty value for the CloudKeeper Prism subdomain. "+
-				"Set the prism_subdomain value in the configuration or use the CLOUDKEEPER_PRISM_SUBDOMAIN environment variable. "+
+				"Set the prism_subdomain value in the configuration or use the PRISM_SUBDOMAIN environment variable. "+
 				"If either is already set, ensure the value is not empty.",
 		)
 	}
@@ -129,7 +129,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 			path.Root("api_token"),
 			"Missing CloudKeeper API Token",
 			"The provider cannot create the CloudKeeper API client as there is a missing or empty value for the CloudKeeper API token. "+
-				"Set the api_token value in the configuration or use the CLOUDKEEPER_API_TOKEN environment variable. "+
+				"Set the api_token value in the configuration or use the PRISM_API_TOKEN environment variable. "+
 				"If either is already set, ensure the value is not empty.",
 		)
 	}

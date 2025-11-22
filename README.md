@@ -28,15 +28,15 @@ Add the following to your Terraform configuration:
 ```hcl
 terraform {
   required_providers {
-    cloudkeeper = {
-      source = "cloudkeeper/cloudkeeper"
+    prism = {
+      source = "cloudkeeper/prism"
     }
   }
 }
 
-provider "cloudkeeper" {
+provider "prism" {
   prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
-  api_token = var.cloudkeeper_token
+  api_token = var.prism_token
 }
 ```
 
@@ -44,8 +44,8 @@ provider "cloudkeeper" {
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/cloudkeeper/terraform-provider-cloudkeeper.git
-cd terraform-provider-cloudkeeper
+git clone https://github.com/CloudKeeper-Inc/terraform-provider-prism.git
+cd terraform-provider-prism
 ```
 
 2. Build and install the provider:
@@ -57,7 +57,7 @@ make install
 ```hcl
 provider_installation {
   dev_overrides {
-    "cloudkeeper/cloudkeeper" = "/path/to/your/go/bin"
+    "cloudkeeper/prism" = "/path/to/your/go/bin"
   }
   direct {}
 }
@@ -69,18 +69,18 @@ provider_installation {
 # Configure the provider
 provider "cloudkeeper" {
   prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
-  api_token = var.cloudkeeper_token
+  api_token = var.prism_token
 }
 
 # Onboard an AWS account
-resource "cloudkeeper_aws_account" "production" {
+resource "prism_aws_account" "production" {
   account_id   = "123456789012"
   account_name = "Production"
   region       = "us-east-1"
 }
 
 # Create a permission set
-resource "cloudkeeper_permission_set" "developer" {
+resource "prism_permission_set" "developer" {
   name             = "DeveloperAccess"
   description      = "Developer access permissions"
   session_duration = "PT12H"
@@ -107,7 +107,7 @@ resource "cloudkeeper_permission_set" "developer" {
 }
 
 # Create a user
-resource "cloudkeeper_user" "john_doe" {
+resource "prism_user" "john_doe" {
   username   = "john.doe"
   email      = "john.doe@example.com"
   first_name = "John"
@@ -116,27 +116,27 @@ resource "cloudkeeper_user" "john_doe" {
 }
 
 # Create a group
-resource "cloudkeeper_group" "developers" {
+resource "prism_group" "developers" {
   name        = "Developers"
   description = "Development team"
 }
 
 # Add user to group
-resource "cloudkeeper_group_membership" "dev_members" {
-  group_name = cloudkeeper_group.developers.name
-  user_ids   = [cloudkeeper_user.john_doe.id]
+resource "prism_group_membership" "dev_members" {
+  group_name = prism_group.developers.name
+  user_ids   = [prism_user.john_doe.id]
 }
 
 # Assign permission set to group
-resource "cloudkeeper_permission_set_assignment" "dev_access" {
-  permission_set_id = cloudkeeper_permission_set.developer.id
+resource "prism_permission_set_assignment" "dev_access" {
+  permission_set_id = prism_permission_set.developer.id
   principal_type    = "GROUP"
-  principal_id      = cloudkeeper_group.developers.name
-  account_id        = cloudkeeper_aws_account.production.account_id
+  principal_id      = prism_group.developers.name
+  account_id        = prism_aws_account.production.account_id
 }
 
 # Configure identity provider
-resource "cloudkeeper_identity_provider" "google" {
+resource "prism_identity_provider" "google" {
   type         = "google"
   alias        = "google"
   display_name = "Sign in with Google"
@@ -154,17 +154,17 @@ resource "cloudkeeper_identity_provider" "google" {
 
 ### Environment Variables
 
-- `PRISM_SUBDOMAIN`: CloudKeeper API base URL
-- `CLOUDKEEPER_API_TOKEN`: API authentication token
+- `PRISM_SUBDOMAIN`: CloudKeeper Prism subdomain
+- `PRISM_API_TOKEN`: API authentication token
 
 ### Provider Arguments
 
 - `prism_subdomain` (Optional, String): The subdomain of your tenant in CloudKeeper Prism. Can also be set via `PRISM_SUBDOMAIN` environment variable.
-- `api_token` (Optional, String, Sensitive): The API token for authentication. Can also be set via `CLOUDKEEPER_API_TOKEN` environment variable.
+- `api_token` (Optional, String, Sensitive): The API token for authentication. Can also be set via `PRISM_API_TOKEN` environment variable.
 
 ## Resources
 
-### cloudkeeper_aws_account
+### prism_aws_account
 
 Manages an AWS account onboarded to CloudKeeper.
 
@@ -174,7 +174,7 @@ Manages an AWS account onboarded to CloudKeeper.
 - `region` (Optional, String): Primary AWS region
 - `role_arn` (Optional, String): IAM role ARN for cross-account access
 
-### cloudkeeper_permission_set
+### prism_permission_set
 
 Manages a permission set.
 
@@ -185,7 +185,7 @@ Manages a permission set.
 - `managed_policies` (Optional, List of Strings): AWS managed policy ARNs
 - `inline_policies` (Optional, Map of Strings): Map of inline IAM policies (JSON). Key is the policy name, value is the policy document.
 
-### cloudkeeper_permission_set_assignment
+### prism_permission_set_assignment
 
 Assigns a permission set to a user or group.
 
@@ -195,7 +195,7 @@ Assigns a permission set to a user or group.
 - `principal_id` (Required, String): User/group ID
 - `account_id` (Required, String): AWS account ID
 
-### cloudkeeper_user
+### prism_user
 
 Manages a user.
 
@@ -207,7 +207,7 @@ Manages a user.
 - `enabled` (Optional, Bool): Whether user is enabled (default: true)
 - `attributes` (Optional, Map of Strings): Custom attributes
 
-### cloudkeeper_group
+### prism_group
 
 Manages a group.
 
@@ -216,7 +216,7 @@ Manages a group.
 - `description` (Optional, String): Description
 - `path` (Optional, String): Group path for hierarchy
 
-### cloudkeeper_group_membership
+### prism_group_membership
 
 Manages group membership.
 
@@ -224,7 +224,7 @@ Manages group membership.
 - `group_name` (Required, String): Group name
 - `user_ids` (Required, List of Strings): User IDs to add to group
 
-### cloudkeeper_identity_provider
+### prism_identity_provider
 
 Manages an identity provider.
 
@@ -239,11 +239,11 @@ Manages an identity provider.
 
 All resources have corresponding data sources for reading existing configurations:
 
-- `data.cloudkeeper_customer`
-- `data.cloudkeeper_aws_account`
-- `data.cloudkeeper_permission_set`
-- `data.cloudkeeper_user`
-- `data.cloudkeeper_group`
+- `data.prism_customer`
+- `data.prism_aws_account`
+- `data.prism_permission_set`
+- `data.prism_user`
+- `data.prism_group`
 
 ## Development
 
