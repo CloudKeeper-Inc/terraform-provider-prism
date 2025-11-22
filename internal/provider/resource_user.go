@@ -138,14 +138,20 @@ func (r *UserResource) Create(ctx context.Context, req resource.CreateRequest, r
 
 	data.ID = types.StringValue(created.ID)
 	data.Username = types.StringValue(created.Username)
-	data.Email = types.StringValue(created.Email)
+	// Only update email if API returned a non-empty value
+	if created.Email != "" {
+		data.Email = types.StringValue(created.Email)
+	}
 	if created.FirstName != "" {
 		data.FirstName = types.StringValue(created.FirstName)
 	}
 	if created.LastName != "" {
 		data.LastName = types.StringValue(created.LastName)
 	}
-	data.Enabled = types.BoolValue(created.Enabled)
+	// Only update enabled if it's explicitly true (preserve plan value if API returns false/default)
+	if created.Enabled {
+		data.Enabled = types.BoolValue(created.Enabled)
+	}
 
 	if len(created.Attributes) > 0 {
 		// Convert map[string][]string from API to map[string]string for Terraform
@@ -186,14 +192,20 @@ func (r *UserResource) Read(ctx context.Context, req resource.ReadRequest, resp 
 	}
 
 	data.Username = types.StringValue(user.Username)
-	data.Email = types.StringValue(user.Email)
+	// Only update email if API returned a non-empty value
+	if user.Email != "" {
+		data.Email = types.StringValue(user.Email)
+	}
 	if user.FirstName != "" {
 		data.FirstName = types.StringValue(user.FirstName)
 	}
 	if user.LastName != "" {
 		data.LastName = types.StringValue(user.LastName)
 	}
-	data.Enabled = types.BoolValue(user.Enabled)
+	// Only update enabled if it's explicitly true (preserve state value if API returns false/default)
+	if user.Enabled {
+		data.Enabled = types.BoolValue(user.Enabled)
+	}
 
 	if len(user.Attributes) > 0 {
 		// Convert map[string][]string from API to map[string]string for Terraform
@@ -252,14 +264,20 @@ func (r *UserResource) Update(ctx context.Context, req resource.UpdateRequest, r
 	}
 
 	data.Username = types.StringValue(updated.Username)
-	data.Email = types.StringValue(updated.Email)
+	// Only update email if API returned a non-empty value
+	if updated.Email != "" {
+		data.Email = types.StringValue(updated.Email)
+	}
 	if updated.FirstName != "" {
 		data.FirstName = types.StringValue(updated.FirstName)
 	}
 	if updated.LastName != "" {
 		data.LastName = types.StringValue(updated.LastName)
 	}
-	data.Enabled = types.BoolValue(updated.Enabled)
+	// Only update enabled if it's explicitly true (preserve plan value if API returns false/default)
+	if updated.Enabled {
+		data.Enabled = types.BoolValue(updated.Enabled)
+	}
 
 	if len(updated.Attributes) > 0 {
 		// Convert map[string][]string from API to map[string]string for Terraform
