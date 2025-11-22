@@ -150,7 +150,6 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 // Resources defines the resources implemented in the provider.
 func (p *CloudKeeperProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewCustomerResource,
 		NewAWSAccountResource,
 		NewPermissionSetResource,
 		NewPermissionSetAssignmentResource,
@@ -164,7 +163,6 @@ func (p *CloudKeeperProvider) Resources(ctx context.Context) []func() resource.R
 // DataSources defines the data sources implemented in the provider.
 func (p *CloudKeeperProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		NewCustomerDataSource,
 		NewAWSAccountDataSource,
 		NewPermissionSetDataSource,
 		NewUserDataSource,
