@@ -127,12 +127,12 @@ resource "prism_group_membership" "dev_members" {
   user_ids   = [prism_user.john_doe.id]
 }
 
-# Assign permission set to group
+# Assign permission set to group for multiple accounts
 resource "prism_permission_set_assignment" "dev_access" {
   permission_set_id = prism_permission_set.developer.id
   principal_type    = "GROUP"
   principal_id      = prism_group.developers.name
-  account_id        = prism_aws_account.production.account_id
+  account_ids       = [prism_aws_account.production.account_id]
 }
 
 # Configure identity provider
@@ -187,13 +187,13 @@ Manages a permission set.
 
 ### prism_permission_set_assignment
 
-Assigns a permission set to a user or group.
+Assigns a permission set to a user or group for multiple AWS accounts.
 
 **Arguments:**
 - `permission_set_id` (Required, String): Permission set ID
 - `principal_type` (Required, String): Principal type (USER or GROUP)
-- `principal_id` (Required, String): User/group ID
-- `account_id` (Required, String): AWS account ID
+- `principal_id` (Required, String): Username or group name
+- `account_ids` (Required, List of Strings): List of AWS account IDs to grant access to
 
 ### prism_user
 

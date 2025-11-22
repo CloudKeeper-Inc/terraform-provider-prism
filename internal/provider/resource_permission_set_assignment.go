@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -30,7 +31,7 @@ type PermissionSetAssignmentResourceModel struct {
 	PermissionSetID types.String `tfsdk:"permission_set_id"`
 	PrincipalType   types.String `tfsdk:"principal_type"`
 	PrincipalID     types.String `tfsdk:"principal_id"`
-	AccountID       types.String `tfsdk:"account_id"`
+	AccountIDs      types.List   `tfsdk:"account_ids"`
 }
 
 func (r *PermissionSetAssignmentResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -73,12 +74,10 @@ func (r *PermissionSetAssignmentResource) Schema(ctx context.Context, req resour
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"account_id": schema.StringAttribute{
+			"account_ids": schema.ListAttribute{
+				ElementType:         types.StringType,
 				Required:            true,
-				MarkdownDescription: "The AWS account ID to grant access to",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				MarkdownDescription: "List of AWS account IDs to grant access to",
 			},
 		},
 	}
@@ -109,20 +108,41 @@ func (r *PermissionSetAssignmentResource) Create(ctx context.Context, req resour
 		return
 	}
 
+	// Extract account IDs from the list
+	var accountIDs []string
+	resp.Diagnostics.Append(data.AccountIDs.ElementsAs(ctx, &accountIDs, false)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	assignment := &PermissionSetAssignment{
 		PermissionSetID: data.PermissionSetID.ValueString(),
 		PrincipalType:   data.PrincipalType.ValueString(),
-		PrincipalID:     data.PrincipalID.ValueString(),
-		AccountID:       data.AccountID.ValueString(),
+		AccountIDs:      accountIDs,
 	}
 
-	created, err := r.client.CreatePermissionSetAssignment(assignment)
+	// Set principal name based on type
+	if data.PrincipalType.ValueString() == "USER" {
+		assignment.Username = data.PrincipalID.ValueString()
+	} else if data.PrincipalType.ValueString() == "GROUP" {
+		assignment.GroupName = data.PrincipalID.ValueString()
+	}
+
+	_, err := r.client.CreatePermissionSetAssignment(assignment)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create permission set assignment, got error: %s", err))
 		return
 	}
 
-	data.ID = types.StringValue(created.ID)
+	// Generate a composite ID representing this assignment configuration
+	// Format: permissionSetId:principalType:principalId:accountId1,accountId2,...
+	compositeID := fmt.Sprintf("%s:%s:%s:%s",
+		data.PermissionSetID.ValueString(),
+		data.PrincipalType.ValueString(),
+		data.PrincipalID.ValueString(),
+		strings.Join(accountIDs, ","))
+
+	data.ID = types.StringValue(compositeID)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -135,17 +155,62 @@ func (r *PermissionSetAssignmentResource) Read(ctx context.Context, req resource
 		return
 	}
 
-	assignment, err := r.client.GetPermissionSetAssignment(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read permission set assignment, got error: %s", err))
+	// Parse the composite ID to get account IDs
+	var accountIDs []string
+	resp.Diagnostics.Append(data.AccountIDs.ElementsAs(ctx, &accountIDs, false)...)
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	data.PermissionSetID = types.StringValue(assignment.PermissionSetID)
-	data.PrincipalType = types.StringValue(assignment.PrincipalType)
-	data.PrincipalID = types.StringValue(assignment.PrincipalID)
-	data.AccountID = types.StringValue(assignment.AccountID)
+	// List all assignments and verify our assignments still exist
+	assignments, err := r.client.ListPermissionSetAssignments()
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list permission set assignments, got error: %s", err))
+		return
+	}
 
+	// Check if assignments for our permission set + principal + accounts still exist
+	principalID := data.PrincipalID.ValueString()
+	permSetID := data.PermissionSetID.ValueString()
+	principalType := data.PrincipalType.ValueString()
+
+	foundCount := 0
+	for _, assignment := range assignments {
+		if assignment.PermissionSetID != permSetID {
+			continue
+		}
+		if assignment.PrincipalType != principalType {
+			continue
+		}
+
+		// Check principal ID matches (could be username or group name)
+		principalMatches := false
+		if principalType == "USER" && assignment.Username == principalID {
+			principalMatches = true
+		} else if principalType == "GROUP" && assignment.GroupName == principalID {
+			principalMatches = true
+		}
+
+		if !principalMatches {
+			continue
+		}
+
+		// Check if this assignment is for one of our accounts
+		for _, accID := range accountIDs {
+			if assignment.AccountID == accID {
+				foundCount++
+				break
+			}
+		}
+	}
+
+	// If none of the assignments exist, remove from state
+	if foundCount == 0 {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+
+	// Keep the state as is - we don't update individual fields
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -165,10 +230,62 @@ func (r *PermissionSetAssignmentResource) Delete(ctx context.Context, req resour
 		return
 	}
 
-	err := r.client.DeletePermissionSetAssignment(data.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete permission set assignment, got error: %s", err))
+	// Parse the composite ID to get account IDs
+	var accountIDs []string
+	resp.Diagnostics.Append(data.AccountIDs.ElementsAs(ctx, &accountIDs, false)...)
+	if resp.Diagnostics.HasError() {
 		return
+	}
+
+	// List all assignments to find the ones we need to delete
+	assignments, err := r.client.ListPermissionSetAssignments()
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list permission set assignments, got error: %s", err))
+		return
+	}
+
+	// Find and delete assignments matching our configuration
+	principalID := data.PrincipalID.ValueString()
+	permSetID := data.PermissionSetID.ValueString()
+	principalType := data.PrincipalType.ValueString()
+
+	var deleteErrors []string
+	for _, assignment := range assignments {
+		if assignment.PermissionSetID != permSetID {
+			continue
+		}
+		if assignment.PrincipalType != principalType {
+			continue
+		}
+
+		// Check principal ID matches
+		principalMatches := false
+		if principalType == "USER" && assignment.Username == principalID {
+			principalMatches = true
+		} else if principalType == "GROUP" && assignment.GroupName == principalID {
+			principalMatches = true
+		}
+
+		if !principalMatches {
+			continue
+		}
+
+		// Check if this assignment is for one of our accounts
+		for _, accID := range accountIDs {
+			if assignment.AccountID == accID {
+				// Delete this assignment
+				err := r.client.DeletePermissionSetAssignment(assignment.ID)
+				if err != nil {
+					deleteErrors = append(deleteErrors, fmt.Sprintf("account %s: %s", accID, err.Error()))
+				}
+				break
+			}
+		}
+	}
+
+	if len(deleteErrors) > 0 {
+		resp.Diagnostics.AddError("Client Error",
+			fmt.Sprintf("Failed to delete some permission set assignments: %s", strings.Join(deleteErrors, "; ")))
 	}
 }
 

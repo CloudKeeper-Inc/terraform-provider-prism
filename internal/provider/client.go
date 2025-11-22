@@ -349,12 +349,15 @@ func (c *Client) ListPermissionSets() ([]PermissionSet, error) {
 // ========== Permission Set Assignment Operations ==========
 
 type PermissionSetAssignment struct {
-	ID              string `json:"id,omitempty"`
-	CustomerID      string `json:"customerId"`
-	PermissionSetID string `json:"permissionSetId"`
-	PrincipalType   string `json:"principalType"` // USER or GROUP
-	PrincipalID     string `json:"principalId"`
-	AccountID       string `json:"accountId"`
+	ID              string   `json:"id,omitempty"`
+	CustomerID      string   `json:"customerId,omitempty"`
+	PermissionSetID string   `json:"permissionSetId"`
+	PrincipalType   string   `json:"principalType"` // USER or GROUP
+	PrincipalID     string   `json:"principalId"`
+	AccountID       string   `json:"accountId,omitempty"`  // Single account (backwards compatibility)
+	AccountIDs      []string `json:"accountIds,omitempty"` // Multiple accounts
+	Username        string   `json:"username,omitempty"`   // For USER type
+	GroupName       string   `json:"groupName,omitempty"`  // For GROUP type
 }
 
 func (c *Client) CreatePermissionSetAssignment(assignment *PermissionSetAssignment) (*PermissionSetAssignment, error) {

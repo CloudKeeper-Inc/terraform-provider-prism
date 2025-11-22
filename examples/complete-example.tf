@@ -167,84 +167,60 @@ resource "prism_group" "auditors" {
 
 resource "prism_group_membership" "admin_members" {
   group_name = prism_group.admins.name
-  user_ids = [
-    prism_user.john_admin.id
+  usernames = [
+    prism_user.john_admin.username
   ]
 }
 
 resource "prism_group_membership" "dev_members" {
   group_name = prism_group.developers.name
-  user_ids = [
-    prism_user.jane_dev.id
+  usernames = [
+    prism_user.jane_dev.username
   ]
 }
 
 resource "prism_group_membership" "auditor_members" {
   group_name = prism_group.auditors.name
-  user_ids = [
-    prism_user.bob_auditor.id
+  usernames = [
+    prism_user.bob_auditor.username
   ]
 }
 
 # ============= Permission Set Assignments =============
 
 # Admin access to all accounts
-resource "prism_permission_set_assignment" "admin_production" {
+resource "prism_permission_set_assignment" "admin_all_accounts" {
   permission_set_id = prism_permission_set.admin.id
   principal_type    = "GROUP"
   principal_id      = prism_group.admins.name
-  account_id        = prism_aws_account.production.account_id
-}
-
-resource "prism_permission_set_assignment" "admin_development" {
-  permission_set_id = prism_permission_set.admin.id
-  principal_type    = "GROUP"
-  principal_id      = prism_group.admins.name
-  account_id        = prism_aws_account.development.account_id
-}
-
-resource "prism_permission_set_assignment" "admin_staging" {
-  permission_set_id = prism_permission_set.admin.id
-  principal_type    = "GROUP"
-  principal_id      = prism_group.admins.name
-  account_id        = prism_aws_account.staging.account_id
+  account_ids = [
+    prism_aws_account.production.account_id,
+    prism_aws_account.development.account_id,
+    prism_aws_account.staging.account_id
+  ]
 }
 
 # Developer access to dev and staging
-resource "prism_permission_set_assignment" "dev_development" {
+resource "prism_permission_set_assignment" "dev_non_prod" {
   permission_set_id = prism_permission_set.developer.id
   principal_type    = "GROUP"
   principal_id      = prism_group.developers.name
-  account_id        = prism_aws_account.development.account_id
-}
-
-resource "prism_permission_set_assignment" "dev_staging" {
-  permission_set_id = prism_permission_set.developer.id
-  principal_type    = "GROUP"
-  principal_id      = prism_group.developers.name
-  account_id        = prism_aws_account.staging.account_id
+  account_ids = [
+    prism_aws_account.development.account_id,
+    prism_aws_account.staging.account_id
+  ]
 }
 
 # Auditor readonly access to all accounts
-resource "prism_permission_set_assignment" "auditor_production" {
+resource "prism_permission_set_assignment" "auditor_all_accounts" {
   permission_set_id = prism_permission_set.readonly.id
   principal_type    = "GROUP"
   principal_id      = prism_group.auditors.name
-  account_id        = prism_aws_account.production.account_id
-}
-
-resource "prism_permission_set_assignment" "auditor_development" {
-  permission_set_id = prism_permission_set.readonly.id
-  principal_type    = "GROUP"
-  principal_id      = prism_group.auditors.name
-  account_id        = prism_aws_account.development.account_id
-}
-
-resource "prism_permission_set_assignment" "auditor_staging" {
-  permission_set_id = prism_permission_set.readonly.id
-  principal_type    = "GROUP"
-  principal_id      = prism_group.auditors.name
-  account_id        = prism_aws_account.staging.account_id
+  account_ids = [
+    prism_aws_account.production.account_id,
+    prism_aws_account.development.account_id,
+    prism_aws_account.staging.account_id
+  ]
 }
 
 # ============= Identity Providers =============
@@ -278,11 +254,6 @@ resource "prism_identity_provider" "microsoft" {
 }
 
 # ============= Outputs =============
-
-output "customer_id" {
-  description = "The customer ID"
-  value       = prism_customer.example_corp.id
-}
 
 output "aws_accounts" {
   description = "Onboarded AWS account IDs"
