@@ -245,6 +245,56 @@ All resources have corresponding data sources for reading existing configuration
 - `data.prism_user`
 - `data.prism_group`
 
+## Importing Existing Infrastructure
+
+If you have existing Prism infrastructure that you want to manage with Terraform, use the built-in import tool to automatically generate Terraform configuration from your current setup.
+
+### Quick Start
+
+```bash
+# Generate Terraform code from existing infrastructure
+make generate-terraform SUBDOMAIN=your-subdomain TOKEN=your-api-token
+
+# Navigate to generated directory
+cd generated-terraform
+
+# Review generated files
+ls -la
+
+# Initialize Terraform
+terraform init
+
+# Import existing resources into state
+chmod +x import.sh
+./import.sh
+
+# Verify everything matches
+terraform plan
+```
+
+### Features
+
+- ✅ Automatically fetches all resources from your Prism instance
+- ✅ Generates organized `.tf` files (separate files for users, groups, etc.)
+- ✅ Extracts repeated values into variables
+- ✅ Creates import script for bringing resources into Terraform state
+- ✅ Uses proper Terraform references instead of hardcoded values
+
+### Generated Files
+
+The import tool creates:
+- `provider.tf` - Provider configuration
+- `variables.tf` - Variable definitions
+- `terraform.tfvars` - Variable values template
+- `aws_accounts.tf` - AWS account resources
+- `permission_sets.tf` - Permission sets with policies
+- `users.tf` - User resources
+- `groups.tf` - Groups and memberships
+- `assignments.tf` - Permission set assignments
+- `import.sh` - Import commands script
+
+For detailed documentation, see [tools/terraform-import/README.md](tools/terraform-import/README.md).
+
 ## Development
 
 ### Building

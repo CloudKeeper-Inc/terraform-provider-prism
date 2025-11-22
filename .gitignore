@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+bin/
 
 # Test binary, built with `go test -c`
 *.test
@@ -32,6 +33,7 @@ go.work.sum
 # CK-Internal-Use folders and files
 PUBLISHING.md
 playground/
+generated-terraform/
 
 # AI Pair Programming
 .claude/
