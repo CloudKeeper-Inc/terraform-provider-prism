@@ -109,14 +109,31 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	// Set ID from API response
 	data.ID = types.StringValue(created.ID)
-	data.AccountID = types.StringValue(created.AccountID)
-	data.AccountName = types.StringValue(created.AccountName)
+
+	// Only update account_id if API returned a non-empty value, otherwise preserve plan value
+	if created.AccountID != "" {
+		data.AccountID = types.StringValue(created.AccountID)
+	}
+
+	// Only update account_name if API returned a non-empty value, otherwise preserve plan value
+	if created.AccountName != "" {
+		data.AccountName = types.StringValue(created.AccountName)
+	}
+
+	// Only update region if API returned a non-empty value
 	if created.Region != "" {
 		data.Region = types.StringValue(created.Region)
 	}
+
+	// Set role_arn: use API value if provided, otherwise compute default
 	if created.RoleArn != "" {
 		data.RoleArn = types.StringValue(created.RoleArn)
+	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
+		// Compute default role ARN if not provided
+		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
+		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -136,12 +153,23 @@ func (r *AWSAccountResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
-	data.AccountName = types.StringValue(account.AccountName)
+	// Only update account_name if API returned a non-empty value, otherwise preserve state value
+	if account.AccountName != "" {
+		data.AccountName = types.StringValue(account.AccountName)
+	}
+
+	// Only update region if API returned a non-empty value
 	if account.Region != "" {
 		data.Region = types.StringValue(account.Region)
 	}
+
+	// Set role_arn: use API value if provided, otherwise compute default
 	if account.RoleArn != "" {
 		data.RoleArn = types.StringValue(account.RoleArn)
+	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
+		// Compute default role ARN
+		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
+		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -168,12 +196,23 @@ func (r *AWSAccountResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	data.AccountName = types.StringValue(updated.AccountName)
+	// Only update account_name if API returned a non-empty value, otherwise preserve plan value
+	if updated.AccountName != "" {
+		data.AccountName = types.StringValue(updated.AccountName)
+	}
+
+	// Only update region if API returned a non-empty value
 	if updated.Region != "" {
 		data.Region = types.StringValue(updated.Region)
 	}
+
+	// Set role_arn: use API value if provided, otherwise compute default
 	if updated.RoleArn != "" {
 		data.RoleArn = types.StringValue(updated.RoleArn)
+	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
+		// Compute default role ARN
+		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
+		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

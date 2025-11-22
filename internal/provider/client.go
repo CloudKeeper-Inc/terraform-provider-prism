@@ -206,11 +206,11 @@ func (c *Client) ListCustomers() ([]Customer, error) {
 
 type AWSAccount struct {
 	ID          string `json:"id,omitempty"`
-	CustomerID  string `json:"customerId"`
-	AccountID   string `json:"accountId"`
-	AccountName string `json:"accountName"`
+	CustomerID  string `json:"customer_id,omitempty"`
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"name"`
 	Region      string `json:"region,omitempty"`
-	RoleArn     string `json:"roleArn,omitempty"`
+	RoleArn     string `json:"role_arn,omitempty"`
 }
 
 func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
