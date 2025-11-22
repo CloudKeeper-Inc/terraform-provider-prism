@@ -1,12 +1,12 @@
 terraform {
   required_providers {
-    cloudkeeper = {
-      source = "cloudkeeper/cloudkeeper"
+    prism = {
+      source = "CloudKeeper-Inc/prism"
     }
   }
 }
 
-provider "cloudkeeper" {
+provider "prism" {
   prism_subdomain  = "YOUR_SUBDOMAIN"
   api_token = var.prism_token
 }

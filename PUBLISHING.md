@@ -1,13 +1,13 @@
 # Publishing Guide for CloudKeeper Prism Terraform Provider
 
-This guide walks you through publishing the `cloudkeeper/prism` provider to the Terraform Registry.
+This guide walks you through publishing the `CloudKeeper-Inc/prism` provider to the Terraform Registry.
 
 ## Provider Details
 
-- **Registry Name**: `cloudkeeper/prism`
-- **Registry URL**: https://registry.terraform.io/providers/cloudkeeper/prism
+- **Registry Name**: `CloudKeeper-Inc/prism`
+- **Registry URL**: https://registry.terraform.io/providers/CloudKeeper-Inc/prism
 - **GitHub Repository**: https://github.com/CloudKeeper-Inc/terraform-provider-prism
-- **Provider Documentation**: https://registry.terraform.io/providers/cloudkeeper/prism/latest/docs
+- **Provider Documentation**: https://registry.terraform.io/providers/CloudKeeper-Inc/prism/latest/docs
 
 ## Prerequisites
 
@@ -135,7 +135,7 @@ Once published, users can use your provider like this:
 terraform {
   required_providers {
     prism = {
-      source  = "cloudkeeper/prism"
+      source  = "CloudKeeper-Inc/prism"
       version = "~> 1.0"
     }
   }

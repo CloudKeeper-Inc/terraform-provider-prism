@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/cloudkeeper/prism",
+		Address: "registry.terraform.io/CloudKeeper-Inc/prism",
 		Debug:   debug,
 	}
 

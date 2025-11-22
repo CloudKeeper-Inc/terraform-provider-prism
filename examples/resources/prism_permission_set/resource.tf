@@ -1,4 +1,4 @@
-resource "cloudkeeper_permission_set" "developer" {
+resource "prism_permission_set" "developer" {
   name             = "DeveloperAccess"
   description      = "Developer access permissions"
   session_duration = "PT4H"

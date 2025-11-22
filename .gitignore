@@ -29,7 +29,8 @@ go.work.sum
 .vscode/
 .DS_Store
 
-# CK-Internal-Use folders
+# CK-Internal-Use folders and files
+PUBLISHING.md
 playground/
 
 # AI Pair Programming

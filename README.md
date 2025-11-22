@@ -29,7 +29,7 @@ Add the following to your Terraform configuration:
 terraform {
   required_providers {
     prism = {
-      source = "cloudkeeper/prism"
+      source = "CloudKeeper-Inc/prism"
     }
   }
 }
@@ -57,7 +57,7 @@ make install
 ```hcl
 provider_installation {
   dev_overrides {
-    "cloudkeeper/prism" = "/path/to/your/go/bin"
+    "CloudKeeper-Inc/prism" = "/path/to/your/go/bin"
   }
   direct {}
 }

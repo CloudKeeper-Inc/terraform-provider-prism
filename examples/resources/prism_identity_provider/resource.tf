@@ -1,5 +1,5 @@
 # Google Identity Provider
-resource "cloudkeeper_identity_provider" "google" {
+resource "prism_identity_provider" "google" {
   type         = "google"
   alias        = "google"
   display_name = "Sign in with Google"
@@ -13,7 +13,7 @@ resource "cloudkeeper_identity_provider" "google" {
 }
 
 # Microsoft Azure AD Identity Provider
-resource "cloudkeeper_identity_provider" "microsoft" {
+resource "prism_identity_provider" "microsoft" {
   type         = "microsoft"
   alias        = "azure-ad"
   display_name = "Sign in with Microsoft"

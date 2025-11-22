@@ -1,4 +1,4 @@
-resource "cloudkeeper_user" "john_doe" {
+resource "prism_user" "john_doe" {
   username   = "john.doe"
   email      = "john.doe@example.com"
   first_name = "John"
