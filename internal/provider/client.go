@@ -399,12 +399,16 @@ func (c *Client) ListPermissionSetAssignments() ([]PermissionSetAssignment, erro
 		return nil, err
 	}
 
-	var result []PermissionSetAssignment
+	// Backend returns { "assignments": [...], "count": N }
+	var result struct {
+		Assignments []PermissionSetAssignment `json:"assignments"`
+		Count       int                       `json:"count"`
+	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return result, nil
+	return result.Assignments, nil
 }
 
 // ========== User Operations ==========
