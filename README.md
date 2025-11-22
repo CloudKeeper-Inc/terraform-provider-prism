@@ -1,2 +1,280 @@
-# terraform-provider-prism
-A Terraform provider to manage CloudKeeper Prism resources, enabling infrastructure-as-code provisioning and management of users, groups, applications, and other Prism objects.
+# Terraform Provider for CloudKeeper Prism 
+
+This is the official Terraform provider for CloudKeeper Prism, a centralized workforce identity and access management solution.
+## Features
+
+The CloudKeeper Prism Terraform provider allows you to manage:
+
+- **AWS Accounts**: Onboarded AWS accounts with SAML/OIDC configuration
+- **Permission Sets**: IAM-like permission definitions
+- **Permission Set Assignments**: Assign permissions to users/groups for specific accounts
+- **Users**: Keycloak users with attributes
+- **Groups**: User groups with hierarchies
+- **Group Memberships**: Manage group membership
+- **Identity Providers**: Google, Microsoft Azure AD, Keycloak, and custom OIDC providers
+
+## Requirements
+
+- [Terraform](https://www.terraform.io/downloads.html) >= 1.0
+- [Go](https://golang.org/doc/install) >= 1.23 (for development)
+- CloudKeeper Prism instance with API access
+
+## Installation
+
+### Using the Provider
+
+Add the following to your Terraform configuration:
+
+```hcl
+terraform {
+  required_providers {
+    cloudkeeper = {
+      source = "cloudkeeper/cloudkeeper"
+    }
+  }
+}
+
+provider "cloudkeeper" {
+  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
+  api_token = var.cloudkeeper_token
+}
+```
+
+### Local Development
+
+1. Clone the repository:
+```bash
+git clone https://github.com/cloudkeeper/terraform-provider-cloudkeeper.git
+cd terraform-provider-cloudkeeper
+```
+
+2. Build and install the provider:
+```bash
+make install
+```
+
+3. Create a `.terraformrc` file in your home directory with local provider override:
+```hcl
+provider_installation {
+  dev_overrides {
+    "cloudkeeper/cloudkeeper" = "/path/to/your/go/bin"
+  }
+  direct {}
+}
+```
+
+## Quick Start Example
+
+```hcl
+# Configure the provider
+provider "cloudkeeper" {
+  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
+  api_token = var.cloudkeeper_token
+}
+
+# Onboard an AWS account
+resource "cloudkeeper_aws_account" "production" {
+  account_id   = "123456789012"
+  account_name = "Production"
+  region       = "us-east-1"
+}
+
+# Create a permission set
+resource "cloudkeeper_permission_set" "developer" {
+  name             = "DeveloperAccess"
+  description      = "Developer access permissions"
+  session_duration = "PT12H"
+
+  managed_policies = [
+    "arn:aws:iam::aws:policy/ReadOnlyAccess"
+  ]
+
+  inline_policies = {
+    s3_access = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Effect = "Allow"
+          Action = [
+            "s3:ListBucket",
+            "s3:GetObject"
+          ]
+          Resource = "*"
+        }
+      ]
+    })
+  }
+}
+
+# Create a user
+resource "cloudkeeper_user" "john_doe" {
+  username   = "john.doe"
+  email      = "john.doe@example.com"
+  first_name = "John"
+  last_name  = "Doe"
+  enabled    = true
+}
+
+# Create a group
+resource "cloudkeeper_group" "developers" {
+  name        = "Developers"
+  description = "Development team"
+}
+
+# Add user to group
+resource "cloudkeeper_group_membership" "dev_members" {
+  group_name = cloudkeeper_group.developers.name
+  user_ids   = [cloudkeeper_user.john_doe.id]
+}
+
+# Assign permission set to group
+resource "cloudkeeper_permission_set_assignment" "dev_access" {
+  permission_set_id = cloudkeeper_permission_set.developer.id
+  principal_type    = "GROUP"
+  principal_id      = cloudkeeper_group.developers.name
+  account_id        = cloudkeeper_aws_account.production.account_id
+}
+
+# Configure identity provider
+resource "cloudkeeper_identity_provider" "google" {
+  type         = "google"
+  alias        = "google"
+  display_name = "Sign in with Google"
+  enabled      = true
+
+  config = jsonencode({
+    clientId     = "your-google-client-id"
+    clientSecret = "your-google-client-secret"
+    hostedDomain = "example.com"
+  })
+}
+```
+
+## Configuration
+
+### Environment Variables
+
+- `PRISM_SUBDOMAIN`: CloudKeeper API base URL
+- `CLOUDKEEPER_API_TOKEN`: API authentication token
+
+### Provider Arguments
+
+- `prism_subdomain` (Optional, String): The subdomain of your tenant in CloudKeeper Prism. Can also be set via `PRISM_SUBDOMAIN` environment variable.
+- `api_token` (Optional, String, Sensitive): The API token for authentication. Can also be set via `CLOUDKEEPER_API_TOKEN` environment variable.
+
+## Resources
+
+### cloudkeeper_aws_account
+
+Manages an AWS account onboarded to CloudKeeper.
+
+**Arguments:**
+- `account_id` (Required, String): AWS account ID (12-digit)
+- `account_name` (Required, String): Friendly name
+- `region` (Optional, String): Primary AWS region
+- `role_arn` (Optional, String): IAM role ARN for cross-account access
+
+### cloudkeeper_permission_set
+
+Manages a permission set.
+
+**Arguments:**
+- `name` (Required, String): Permission set name
+- `description` (Optional, String): Description
+- `session_duration` (Optional, String): Session duration (ISO 8601 format, e.g., PT4H)
+- `managed_policies` (Optional, List of Strings): AWS managed policy ARNs
+- `inline_policies` (Optional, Map of Strings): Map of inline IAM policies (JSON). Key is the policy name, value is the policy document.
+
+### cloudkeeper_permission_set_assignment
+
+Assigns a permission set to a user or group.
+
+**Arguments:**
+- `permission_set_id` (Required, String): Permission set ID
+- `principal_type` (Required, String): Principal type (USER or GROUP)
+- `principal_id` (Required, String): User/group ID
+- `account_id` (Required, String): AWS account ID
+
+### cloudkeeper_user
+
+Manages a user.
+
+**Arguments:**
+- `username` (Required, String): Username
+- `email` (Required, String): Email address
+- `first_name` (Optional, String): First name
+- `last_name` (Optional, String): Last name
+- `enabled` (Optional, Bool): Whether user is enabled (default: true)
+- `attributes` (Optional, Map of Strings): Custom attributes
+
+### cloudkeeper_group
+
+Manages a group.
+
+**Arguments:**
+- `name` (Required, String): Group name
+- `description` (Optional, String): Description
+- `path` (Optional, String): Group path for hierarchy
+
+### cloudkeeper_group_membership
+
+Manages group membership.
+
+**Arguments:**
+- `group_name` (Required, String): Group name
+- `user_ids` (Required, List of Strings): User IDs to add to group
+
+### cloudkeeper_identity_provider
+
+Manages an identity provider.
+
+**Arguments:**
+- `type` (Required, String): Provider type (google, microsoft, keycloak, custom)
+- `alias` (Required, String): Provider alias
+- `display_name` (Optional, String): Display name
+- `enabled` (Optional, Bool): Whether provider is enabled (default: true)
+- `config` (Required, String, Sensitive): JSON configuration
+
+## Data Sources
+
+All resources have corresponding data sources for reading existing configurations:
+
+- `data.cloudkeeper_customer`
+- `data.cloudkeeper_aws_account`
+- `data.cloudkeeper_permission_set`
+- `data.cloudkeeper_user`
+- `data.cloudkeeper_group`
+
+## Development
+
+### Building
+
+```bash
+make build
+```
+
+### Testing
+
+```bash
+make test
+```
+
+### Acceptance Tests
+
+```bash
+make testacc
+```
+
+### Generating Documentation
+
+```bash
+make docs
+```
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+This provider is licensed under the Mozilla Public License 2.0.
