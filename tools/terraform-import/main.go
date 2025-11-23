@@ -694,14 +694,19 @@ func generateImportScript(outputDir string, data *InfrastructureData) error {
 		sb.WriteString("# Import Permission Set Assignments\n")
 		sb.WriteString("echo \"Importing permission set assignments...\"\n")
 
-		// Group assignments by permission set + principal
+		// Group assignments by permission set + principal to match Terraform resources
 		type assignmentKey struct {
 			PermissionSetID string
 			PrincipalType   string
 			PrincipalID     string
 		}
 
-		grouped := make(map[assignmentKey][]string)
+		type assignmentGroup struct {
+			AccountIDs    []string
+			AssignmentIDs []string
+		}
+
+		grouped := make(map[assignmentKey]*assignmentGroup)
 
 		for _, assignment := range data.PermissionSetAssignments {
 			principalID := assignment.Username
@@ -715,11 +720,15 @@ func generateImportScript(outputDir string, data *InfrastructureData) error {
 				PrincipalID:     principalID,
 			}
 
-			grouped[key] = append(grouped[key], assignment.AccountID)
+			if grouped[key] == nil {
+				grouped[key] = &assignmentGroup{}
+			}
+			grouped[key].AccountIDs = append(grouped[key].AccountIDs, assignment.AccountID)
+			grouped[key].AssignmentIDs = append(grouped[key].AssignmentIDs, assignment.ID)
 		}
 
 		counter := 0
-		for key, accountIDs := range grouped {
+		for key, group := range grouped {
 			counter++
 
 			// Find permission set name
@@ -736,12 +745,8 @@ func generateImportScript(outputDir string, data *InfrastructureData) error {
 				resourceName = toResourceName(permSetName + "_" + key.PrincipalID)
 			}
 
-			// Create composite ID
-			compositeID := fmt.Sprintf("%s:%s:%s:%s",
-				key.PermissionSetID,
-				key.PrincipalType,
-				key.PrincipalID,
-				strings.Join(accountIDs, ","))
+			// Create composite ID from actual assignment IDs (new format)
+			compositeID := strings.Join(group.AssignmentIDs, ",")
 
 			sb.WriteString(fmt.Sprintf("terraform import prism_permission_set_assignment.%s '%s'\n", resourceName, compositeID))
 		}

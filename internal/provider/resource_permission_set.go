@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -276,7 +278,96 @@ func (r *PermissionSetResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	err := r.client.DeletePermissionSet(data.ID.ValueString())
+	permissionSetID := data.ID.ValueString()
+
+	// Before deleting the permission set, delete all assignments that use it
+	// This prevents the "permission set has active assignments" error
+	assignments, err := r.client.ListPermissionSetAssignments()
+	if err != nil {
+		// Log warning but continue - if we can't list assignments, try to delete anyway
+		resp.Diagnostics.AddWarning(
+			"Unable to List Assignments",
+			fmt.Sprintf("Could not list permission set assignments before deleting permission set. If assignments exist, deletion may fail: %s", err),
+		)
+	} else {
+		// Find and delete all assignments for this permission set
+		var deleteErrors []string
+		var deletedIDs []string
+
+		for _, assignment := range assignments {
+			if assignment.PermissionSetID == permissionSetID {
+				err := r.client.DeletePermissionSetAssignment(assignment.ID)
+				if err != nil {
+					// Collect errors but continue trying to delete other assignments
+					deleteErrors = append(deleteErrors, fmt.Sprintf("assignment %s: %s", assignment.ID, err.Error()))
+				} else {
+					deletedIDs = append(deletedIDs, assignment.ID)
+				}
+			}
+		}
+
+		if len(deleteErrors) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Failed to Delete Some Assignments",
+				fmt.Sprintf("Could not delete all assignments for permission set. Deletion may fail. Errors: %s",
+					strings.Join(deleteErrors, "; ")),
+			)
+		}
+
+		if len(deletedIDs) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Automatic Assignment Cleanup",
+				fmt.Sprintf("Automatically deleted %d permission set assignment(s) before deleting the permission set. This may affect other Terraform resources if they manage these assignments.",
+					len(deletedIDs)),
+			)
+
+			// Wait for assignments to be fully deleted (backend processes asynchronously)
+			// Poll for up to 30 seconds to verify assignments are gone
+			maxWaitTime := 30 * time.Second
+			pollInterval := 2 * time.Second
+			startTime := time.Now()
+
+			for time.Since(startTime) < maxWaitTime {
+				// Check if assignments still exist
+				stillExists := false
+				for _, deletedID := range deletedIDs {
+					_, err := r.client.GetPermissionSetAssignment(deletedID)
+					if err == nil {
+						// Assignment still exists
+						stillExists = true
+						break
+					}
+					// 404 means it's gone, which is what we want
+					if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
+						// Some other error - log it but continue
+						resp.Diagnostics.AddWarning(
+							"Error Checking Assignment Status",
+							fmt.Sprintf("Could not verify assignment %s was deleted: %s", deletedID, err),
+						)
+					}
+				}
+
+				if !stillExists {
+					// All assignments are deleted
+					break
+				}
+
+				// Wait before next poll
+				time.Sleep(pollInterval)
+			}
+
+			// Final check - if assignments still exist after waiting, warn the user
+			if time.Since(startTime) >= maxWaitTime {
+				resp.Diagnostics.AddWarning(
+					"Assignment Deletion Timeout",
+					fmt.Sprintf("Waited %v for assignments to be deleted but they may still be processing. Permission set deletion may fail.", maxWaitTime),
+				)
+			}
+		}
+	}
+
+	// Now delete the permission set
+	err = r.client.DeletePermissionSet(permissionSetID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete permission set, got error: %s", err))
 		return

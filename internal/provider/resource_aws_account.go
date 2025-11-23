@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -226,7 +228,97 @@ func (r *AWSAccountResource) Delete(ctx context.Context, req resource.DeleteRequ
 		return
 	}
 
-	err := r.client.DeleteAWSAccount(data.AccountID.ValueString())
+	accountID := data.AccountID.ValueString()
+
+	// Before deleting the account, we need to delete all permission set assignments
+	// that reference this account. This handles cases where Terraform's dependency
+	// graph doesn't capture the relationship (e.g., hardcoded account IDs)
+	assignments, err := r.client.ListPermissionSetAssignments()
+	if err != nil {
+		// Log warning but continue - if we can't list assignments, try to delete anyway
+		resp.Diagnostics.AddWarning(
+			"Unable to List Assignments",
+			fmt.Sprintf("Could not list permission set assignments before deleting account. If assignments exist, account deletion may fail: %s", err),
+		)
+	} else {
+		// Find and delete all assignments for this account
+		var deleteErrors []string
+		var deletedIDs []string
+
+		for _, assignment := range assignments {
+			if assignment.AccountID == accountID {
+				err := r.client.DeletePermissionSetAssignment(assignment.ID)
+				if err != nil {
+					// Collect errors but continue trying to delete other assignments
+					deleteErrors = append(deleteErrors, fmt.Sprintf("assignment %s: %s", assignment.ID, err.Error()))
+				} else {
+					deletedIDs = append(deletedIDs, assignment.ID)
+				}
+			}
+		}
+
+		if len(deleteErrors) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Failed to Delete Some Assignments",
+				fmt.Sprintf("Could not delete all permission set assignments for account %s. Account deletion may fail. Errors: %s",
+					accountID, strings.Join(deleteErrors, "; ")),
+			)
+		}
+
+		if len(deletedIDs) > 0 {
+			resp.Diagnostics.AddWarning(
+				"Automatic Assignment Cleanup",
+				fmt.Sprintf("Automatically deleted %d permission set assignment(s) for account %s before deleting the account. This may affect other Terraform resources if they manage these assignments.",
+					len(deletedIDs), accountID),
+			)
+
+			// Wait for assignments to be fully deleted (backend processes asynchronously)
+			// Poll for up to 30 seconds to verify assignments are gone
+			maxWaitTime := 30 * time.Second
+			pollInterval := 2 * time.Second
+			startTime := time.Now()
+
+			for time.Since(startTime) < maxWaitTime {
+				// Check if assignments still exist
+				stillExists := false
+				for _, deletedID := range deletedIDs {
+					_, err := r.client.GetPermissionSetAssignment(deletedID)
+					if err == nil {
+						// Assignment still exists
+						stillExists = true
+						break
+					}
+					// 404 means it's gone, which is what we want
+					if !strings.Contains(err.Error(), "404") && !strings.Contains(err.Error(), "not found") {
+						// Some other error - log it but continue
+						resp.Diagnostics.AddWarning(
+							"Error Checking Assignment Status",
+							fmt.Sprintf("Could not verify assignment %s was deleted: %s", deletedID, err),
+						)
+					}
+				}
+
+				if !stillExists {
+					// All assignments are deleted
+					break
+				}
+
+				// Wait before next poll
+				time.Sleep(pollInterval)
+			}
+
+			// Final check - if assignments still exist after waiting, warn the user
+			if time.Since(startTime) >= maxWaitTime {
+				resp.Diagnostics.AddWarning(
+					"Assignment Deletion Timeout",
+					fmt.Sprintf("Waited %v for assignments to be deleted but they may still be processing. Account deletion may fail.", maxWaitTime),
+				)
+			}
+		}
+	}
+
+	// Now delete the account
+	err = r.client.DeleteAWSAccount(accountID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete AWS account, got error: %s", err))
 		return

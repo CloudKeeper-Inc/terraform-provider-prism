@@ -134,14 +134,68 @@ func (r *PermissionSetAssignmentResource) Create(ctx context.Context, req resour
 		return
 	}
 
-	// Generate a composite ID representing this assignment configuration
-	// Format: permissionSetId:principalType:principalId:accountId1,accountId2,...
-	compositeID := fmt.Sprintf("%s:%s:%s:%s",
-		data.PermissionSetID.ValueString(),
-		data.PrincipalType.ValueString(),
-		data.PrincipalID.ValueString(),
-		strings.Join(accountIDs, ","))
+	// After creating, we need to find the actual assignment IDs that were created
+	// The backend creates one assignment per account, but only returns the first one
+	// So we need to list all assignments and find the ones we just created
+	assignments, err := r.client.ListPermissionSetAssignments()
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list permission set assignments after create, got error: %s", err))
+		return
+	}
 
+	// Find the assignments we just created by matching all criteria
+	principalID := data.PrincipalID.ValueString()
+	permSetID := data.PermissionSetID.ValueString()
+	principalType := data.PrincipalType.ValueString()
+
+	var createdAssignmentIDs []string
+	for _, acctID := range accountIDs {
+		found := false
+		for _, apiAssignment := range assignments {
+			if apiAssignment.PermissionSetID != permSetID {
+				continue
+			}
+			if apiAssignment.PrincipalType != principalType {
+				continue
+			}
+			if apiAssignment.AccountID != acctID {
+				continue
+			}
+
+			// Check principal ID matches
+			principalMatches := false
+			if principalType == "USER" && apiAssignment.Username == principalID {
+				principalMatches = true
+			} else if principalType == "GROUP" && apiAssignment.GroupName == principalID {
+				principalMatches = true
+			}
+
+			if principalMatches {
+				createdAssignmentIDs = append(createdAssignmentIDs, apiAssignment.ID)
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			resp.Diagnostics.AddWarning(
+				"Assignment Not Found",
+				fmt.Sprintf("Could not find assignment for account %s after creation. It may have been created but not immediately visible.", acctID),
+			)
+		}
+	}
+
+	if len(createdAssignmentIDs) == 0 {
+		resp.Diagnostics.AddError(
+			"No Assignments Found",
+			"Failed to locate any of the created assignments. They may have been created but are not yet visible in the API.",
+		)
+		return
+	}
+
+	// Store the actual API assignment IDs in the composite ID
+	// Format: assignmentId1,assignmentId2,assignmentId3,...
+	compositeID := strings.Join(createdAssignmentIDs, ",")
 	data.ID = types.StringValue(compositeID)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -155,62 +209,51 @@ func (r *PermissionSetAssignmentResource) Read(ctx context.Context, req resource
 		return
 	}
 
-	// Parse the composite ID to get account IDs
-	var accountIDs []string
-	resp.Diagnostics.Append(data.AccountIDs.ElementsAs(ctx, &accountIDs, false)...)
-	if resp.Diagnostics.HasError() {
+	// Parse the composite ID to get the actual assignment IDs
+	assignmentIDs := strings.Split(data.ID.ValueString(), ",")
+	if len(assignmentIDs) == 0 {
+		resp.Diagnostics.AddError(
+			"Invalid State",
+			"No assignment IDs found in state. The resource may be corrupted.",
+		)
 		return
 	}
 
-	// List all assignments and verify our assignments still exist
-	assignments, err := r.client.ListPermissionSetAssignments()
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list permission set assignments, got error: %s", err))
-		return
-	}
-
-	// Check if assignments for our permission set + principal + accounts still exist
-	principalID := data.PrincipalID.ValueString()
-	permSetID := data.PermissionSetID.ValueString()
-	principalType := data.PrincipalType.ValueString()
-
-	foundCount := 0
-	for _, assignment := range assignments {
-		if assignment.PermissionSetID != permSetID {
-			continue
-		}
-		if assignment.PrincipalType != principalType {
-			continue
-		}
-
-		// Check principal ID matches (could be username or group name)
-		principalMatches := false
-		if principalType == "USER" && assignment.Username == principalID {
-			principalMatches = true
-		} else if principalType == "GROUP" && assignment.GroupName == principalID {
-			principalMatches = true
-		}
-
-		if !principalMatches {
-			continue
-		}
-
-		// Check if this assignment is for one of our accounts
-		for _, accID := range accountIDs {
-			if assignment.AccountID == accID {
-				foundCount++
-				break
+	// Check if each assignment still exists by trying to get it
+	existingCount := 0
+	for _, assignmentID := range assignmentIDs {
+		_, err := r.client.GetPermissionSetAssignment(assignmentID)
+		if err != nil {
+			// If 404 or not found, skip it
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				continue
 			}
+			// Other errors should be reported
+			resp.Diagnostics.AddWarning(
+				"API Error",
+				fmt.Sprintf("Unable to read assignment %s: %s", assignmentID, err),
+			)
+			continue
 		}
+		existingCount++
 	}
 
 	// If none of the assignments exist, remove from state
-	if foundCount == 0 {
+	if existingCount == 0 {
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	// Keep the state as is - we don't update individual fields
+	// If some but not all assignments exist, that's unusual but we keep the resource
+	// The user can destroy and recreate if needed
+	if existingCount < len(assignmentIDs) {
+		resp.Diagnostics.AddWarning(
+			"Partial Assignment Drift",
+			fmt.Sprintf("Only %d of %d assignments still exist. Some may have been deleted outside Terraform.", existingCount, len(assignmentIDs)),
+		)
+	}
+
+	// Keep the state as is - we don't update individual fields since they're inputs
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -230,56 +273,24 @@ func (r *PermissionSetAssignmentResource) Delete(ctx context.Context, req resour
 		return
 	}
 
-	// Parse the composite ID to get account IDs
-	var accountIDs []string
-	resp.Diagnostics.Append(data.AccountIDs.ElementsAs(ctx, &accountIDs, false)...)
-	if resp.Diagnostics.HasError() {
+	// Parse the composite ID to get the actual assignment IDs we created
+	assignmentIDs := strings.Split(data.ID.ValueString(), ",")
+	if len(assignmentIDs) == 0 {
+		// Nothing to delete
 		return
 	}
 
-	// List all assignments to find the ones we need to delete
-	assignments, err := r.client.ListPermissionSetAssignments()
-	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list permission set assignments, got error: %s", err))
-		return
-	}
-
-	// Find and delete assignments matching our configuration
-	principalID := data.PrincipalID.ValueString()
-	permSetID := data.PermissionSetID.ValueString()
-	principalType := data.PrincipalType.ValueString()
-
+	// Delete each assignment by its actual API ID
+	// This ensures we only delete the assignments we created
 	var deleteErrors []string
-	for _, assignment := range assignments {
-		if assignment.PermissionSetID != permSetID {
-			continue
-		}
-		if assignment.PrincipalType != principalType {
-			continue
-		}
-
-		// Check principal ID matches
-		principalMatches := false
-		if principalType == "USER" && assignment.Username == principalID {
-			principalMatches = true
-		} else if principalType == "GROUP" && assignment.GroupName == principalID {
-			principalMatches = true
-		}
-
-		if !principalMatches {
-			continue
-		}
-
-		// Check if this assignment is for one of our accounts
-		for _, accID := range accountIDs {
-			if assignment.AccountID == accID {
-				// Delete this assignment
-				err := r.client.DeletePermissionSetAssignment(assignment.ID)
-				if err != nil {
-					deleteErrors = append(deleteErrors, fmt.Sprintf("account %s: %s", accID, err.Error()))
-				}
-				break
+	for _, assignmentID := range assignmentIDs {
+		err := r.client.DeletePermissionSetAssignment(assignmentID)
+		if err != nil {
+			// If already deleted (404), that's OK
+			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+				continue
 			}
+			deleteErrors = append(deleteErrors, fmt.Sprintf("assignment %s: %s", assignmentID, err.Error()))
 		}
 	}
 
