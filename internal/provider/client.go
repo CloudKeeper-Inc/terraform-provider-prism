@@ -144,17 +144,43 @@ type AWSAccount struct {
 }
 
 func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
-	body, err := c.doRequest("POST", "/aws-accounts", account)
+	// Use the onboard endpoint which does full account setup (IdP/OIDC)
+	requestBody := map[string]interface{}{
+		"accountId":   account.AccountID,
+		"accountName": account.AccountName,
+	}
+
+	body, err := c.doRequest("POST", "/accounts/onboard", requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	var result AWSAccount
-	if err := json.Unmarshal(body, &result); err != nil {
+	// The onboard endpoint returns a complex structure with the account nested
+	var response struct {
+		Account struct {
+			ID        string `json:"id"`
+			AccountID string `json:"account_id"`
+			Name      string `json:"name"`
+			Status    string `json:"status"`
+			Region    string `json:"region,omitempty"`
+			RoleArn   string `json:"role_arn,omitempty"`
+		} `json:"account"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return &result, nil
+	// Convert to AWSAccount
+	result := &AWSAccount{
+		ID:          response.Account.ID,
+		AccountID:   response.Account.AccountID,
+		AccountName: response.Account.Name,
+		Region:      response.Account.Region,
+		RoleArn:     response.Account.RoleArn,
+	}
+
+	return result, nil
 }
 
 func (c *Client) GetAWSAccount(accountID string) (*AWSAccount, error) {

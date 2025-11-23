@@ -138,8 +138,11 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 		return
 	}
 
+	// to change to https://prism.cloudkeeper.com:8090 upon production release
+	var baseUrl = "https://auth.cloudkeeper.com:8090"
+
 	// Create a new CloudKeeper client using the configuration values
-	client := NewClient("https://auth.cloudkeeper.com:8090", prismSubdomain, apiToken)
+	client := NewClient(baseUrl, prismSubdomain, apiToken)
 
 	// Make the CloudKeeper client available during DataSource and Resource
 	// type Configure methods.
