@@ -235,7 +235,7 @@ func generateFiles(outputDir string, data *InfrastructureData, variables *Variab
 	}
 
 	// Generate terraform.tfvars
-	if err := generateTFVarsFile(outputDir, data, variables); err != nil {
+	if err := generateTFVarsFile(outputDir, variables); err != nil {
 		return err
 	}
 
@@ -330,7 +330,7 @@ func generateVariablesFile(outputDir string, variables *Variables) error {
 	return os.WriteFile(filepath.Join(outputDir, "variables.tf"), []byte(sb.String()), 0644)
 }
 
-func generateTFVarsFile(outputDir string, data *InfrastructureData, variables *Variables) error {
+func generateTFVarsFile(outputDir string, variables *Variables) error {
 	var sb strings.Builder
 
 	sb.WriteString("# Provider Configuration\n")
@@ -412,8 +412,13 @@ func generatePermissionSetsFile(outputDir string, permSets []provider.Permission
 				// Pretty print JSON
 				var policyObj interface{}
 				if err := json.Unmarshal([]byte(policy), &policyObj); err == nil {
-					prettyJSON, _ := json.MarshalIndent(policyObj, "    ", "  ")
-					sb.WriteString(fmt.Sprintf("    %s = <<-EOT\n%s\nEOT\n", name, indent(string(prettyJSON), 4)))
+					prettyJSON, err := json.MarshalIndent(policyObj, "    ", "  ")
+					if err == nil {
+						sb.WriteString(fmt.Sprintf("    %s = <<-EOT\n%s\nEOT\n", name, indent(string(prettyJSON), 4)))
+					} else {
+						// Fallback to raw policy if marshal fails
+						sb.WriteString(fmt.Sprintf("    %s = %q\n", name, policy))
+					}
 				} else {
 					sb.WriteString(fmt.Sprintf("    %s = %q\n", name, policy))
 				}
