@@ -1,0 +1,37 @@
+provider:
+  name: prism
+
+rendering:
+  # Include resource subcategories in navigation
+  include_resource_subcategories: true
+
+resources:
+  # AWS Account
+  - name: prism_aws_account
+    subcategory: "AWS Resources"
+
+  # Permission Sets
+  - name: prism_permission_set
+    subcategory: "Permission Management"
+
+  # Permission Set Assignments
+  - name: prism_permission_set_assignment
+    subcategory: "Permission Management"
+
+  # Users and Groups
+  - name: prism_user
+    subcategory: "Identity Management"
+
+  - name: prism_group
+    subcategory: "Identity Management"
+
+  - name: prism_group_membership
+    subcategory: "Identity Management"
+
+  # Identity Providers
+  - name: prism_identity_provider
+    subcategory: "Identity Providers"
+
+  # Customer (if exists)
+  - name: prism_customer
+    subcategory: "Organization"

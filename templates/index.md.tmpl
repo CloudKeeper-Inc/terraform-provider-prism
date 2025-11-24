@@ -1,0 +1,65 @@
+---
+page_title: "Provider: CloudKeeper Prism"
+description: |-
+  The CloudKeeper Prism provider is used to interact with CloudKeeper's identity and access management (IAM) platform for AWS.
+---
+
+# CloudKeeper Prism Provider
+
+The CloudKeeper Prism provider allows you to manage your CloudKeeper Prism infrastructure as code. CloudKeeper Prism is an identity and access management platform that provides centralized authentication and authorization for AWS environments.
+
+Use the provider to manage:
+
+- **AWS Accounts**: Onboard and configure AWS accounts for SSO access
+- **Permission Sets**: Define IAM policies and session durations for AWS access
+- **Users & Groups**: Manage user identities and group memberships
+- **Permission Set Assignments**: Grant users and groups access to AWS accounts with specific permission sets
+- **Identity Providers**: Configure external identity providers (Google, Microsoft, Keycloak, custom OIDC)
+
+## Example Usage
+
+{{ tffile "examples/provider/provider.tf" }}
+
+## Authentication
+
+The provider requires a CloudKeeper Prism subdomain and API token for authentication.
+
+### Environment Variables
+
+You can provide credentials via environment variables:
+
+```shell
+export PRISM_SUBDOMAIN="your-subdomain"
+export PRISM_API_TOKEN="your-api-token"
+```
+
+### Configuration
+
+Alternatively, you can specify credentials directly in the provider configuration (not recommended):
+
+```terraform
+provider "prism" {
+  prism_subdomain = "your-subdomain"
+  api_token       = "your-api-token"
+}
+```
+
+## Schema
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Getting Started
+
+1. **Onboard AWS Accounts**: Start by adding your AWS accounts using the `prism_aws_account` resource
+2. **Create Permission Sets**: Define permission sets with IAM policies using `prism_permission_set`
+3. **Manage Users/Groups**: Create users and groups with `prism_user` and `prism_group`
+4. **Assign Permissions**: Grant access by creating `prism_permission_set_assignment` resources
+5. **Configure SSO**: Set up identity providers with `prism_identity_provider`
+
+For a complete example showing all resources working together, see [examples/complete-example.tf](https://github.com/CloudKeeper-Inc/terraform-provider-prism/blob/main/examples/complete-example.tf).
+
+## Support
+
+- **Documentation**: [CloudKeeper Prism Docs](https://docs.cloudkeeper.com)
+- **Issues**: [GitHub Issues](https://github.com/CloudKeeper-Inc/terraform-provider-prism/issues)
+- **Provider Registry**: [Terraform Registry](https://registry.terraform.io/providers/CloudKeeper-Inc/prism/latest)

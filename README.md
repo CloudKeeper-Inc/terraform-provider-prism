@@ -138,7 +138,6 @@ resource "prism_permission_set_assignment" "dev_access" {
 # Configure identity provider
 resource "prism_identity_provider" "google" {
   type         = "google"
-  alias        = "google"
   display_name = "Sign in with Google"
   enabled      = true
 
@@ -230,10 +229,35 @@ Manages an identity provider.
 
 **Arguments:**
 - `type` (Required, String): Provider type (google, microsoft, keycloak, custom)
-- `alias` (Required, String): Provider alias
 - `display_name` (Optional, String): Display name
 - `enabled` (Optional, Bool): Whether provider is enabled (default: true)
 - `config` (Required, String, Sensitive): JSON configuration
+
+**Read-Only:**
+- `alias` (String): Auto-generated based on type (e.g., "google" for Google)
+
+## Documentation
+
+Complete documentation is available on the [Terraform Registry](https://registry.terraform.io/providers/CloudKeeper-Inc/prism/latest/docs).
+
+The documentation includes:
+- **Provider Configuration**: Authentication and setup
+- **Resource Reference**: Detailed documentation for all resources with examples
+- **Data Source Reference**: Documentation for all data sources
+- **Import Guides**: How to import existing resources
+
+### Generating Documentation Locally
+
+The provider documentation is auto-generated using terraform-plugin-docs:
+
+```bash
+make docs
+```
+
+This will regenerate all documentation in the `docs/` directory based on:
+- Schema descriptions in the provider code
+- Example files in `examples/`
+- Template files in `templates/`
 
 ## Data Sources
 
