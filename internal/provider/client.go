@@ -576,49 +576,303 @@ type IdentityProvider struct {
 }
 
 func (c *Client) CreateIdentityProvider(idpType string, idp *IdentityProvider) (*IdentityProvider, error) {
-	body, err := c.doRequest("POST", fmt.Sprintf("/identity-providers/%s", idpType), idp)
+	// Build request body based on IdP type - backend expects fields at top level, not nested in config
+	requestBody := make(map[string]interface{})
+
+	// Common fields
+	if idp.DisplayName != "" {
+		requestBody["displayName"] = idp.DisplayName
+	}
+	requestBody["enabled"] = idp.Enabled
+
+	// Extract config fields and add to top level based on type
+	switch idpType {
+	case "google":
+		// Google requires: clientId, clientSecret, hostedDomain (optional)
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if hostedDomain, ok := idp.Config["hostedDomain"].(string); ok {
+			requestBody["hostedDomain"] = hostedDomain
+		}
+		// Backend forces these values
+		requestBody["trustEmail"] = true
+		requestBody["storeToken"] = false
+		requestBody["addReadTokenRoleOnCreate"] = false
+		requestBody["syncMode"] = "FORCE"
+
+	case "microsoft":
+		// Microsoft requires: clientId, clientSecret, tenantId
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if tenantId, ok := idp.Config["tenantId"].(string); ok {
+			requestBody["tenantId"] = tenantId
+		}
+		requestBody["trustEmail"] = true
+		requestBody["storeToken"] = false
+		requestBody["syncMode"] = "FORCE"
+
+	case "keycloak":
+		// Keycloak requires: clientId, clientSecret, authServerUrl, targetRealm
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if authServerUrl, ok := idp.Config["authServerUrl"].(string); ok {
+			requestBody["authServerUrl"] = authServerUrl
+		}
+		if targetRealm, ok := idp.Config["targetRealm"].(string); ok {
+			requestBody["targetRealm"] = targetRealm
+		}
+
+	case "custom":
+		// Custom OIDC requires: clientId, clientSecret, authServerUrl, authorizationUrl, tokenUrl, userInfoUrl, issuer
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if authServerUrl, ok := idp.Config["authServerUrl"].(string); ok {
+			requestBody["authServerUrl"] = authServerUrl
+		}
+		if authorizationUrl, ok := idp.Config["authorizationUrl"].(string); ok {
+			requestBody["authorizationUrl"] = authorizationUrl
+		}
+		if tokenUrl, ok := idp.Config["tokenUrl"].(string); ok {
+			requestBody["tokenUrl"] = tokenUrl
+		}
+		if userInfoUrl, ok := idp.Config["userInfoUrl"].(string); ok {
+			requestBody["userInfoUrl"] = userInfoUrl
+		}
+		if logoutUrl, ok := idp.Config["logoutUrl"].(string); ok {
+			requestBody["logoutUrl"] = logoutUrl
+		}
+		if issuer, ok := idp.Config["issuer"].(string); ok {
+			requestBody["issuer"] = issuer
+		}
+		if providerName, ok := idp.Config["providerName"].(string); ok {
+			requestBody["providerName"] = providerName
+		}
+	}
+
+	body, err := c.doRequest("POST", fmt.Sprintf("/identity-providers/%s", idpType), requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	var result IdentityProvider
-	if err := json.Unmarshal(body, &result); err != nil {
+	// Parse response - backend returns nested in "identityProvider" field
+	var response struct {
+		IdentityProvider struct {
+			Alias       string            `json:"alias"`
+			DisplayName string            `json:"displayName"`
+			ProviderId  string            `json:"providerId"`
+			Enabled     bool              `json:"enabled"`
+			TrustEmail  bool              `json:"trustEmail"`
+			StoreToken  bool              `json:"storeToken"`
+			Config      map[string]string `json:"config"`
+		} `json:"identityProvider"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return &result, nil
+	// Convert response to IdentityProvider
+	result := &IdentityProvider{
+		Type:        idpType,
+		Alias:       response.IdentityProvider.Alias,
+		DisplayName: response.IdentityProvider.DisplayName,
+		Enabled:     response.IdentityProvider.Enabled,
+		Config:      make(map[string]interface{}),
+	}
+
+	// Convert config map from string to interface{}
+	for k, v := range response.IdentityProvider.Config {
+		result.Config[k] = v
+	}
+
+	return result, nil
 }
 
 func (c *Client) GetIdentityProvider(idpType, alias string) (*IdentityProvider, error) {
-	body, err := c.doRequest("GET", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), nil)
+	// Backend endpoint is just /identity-providers/{type}, not with alias
+	body, err := c.doRequest("GET", fmt.Sprintf("/identity-providers/%s", idpType), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var result IdentityProvider
-	if err := json.Unmarshal(body, &result); err != nil {
+	// Parse response - backend returns nested in "identityProvider" field
+	var response struct {
+		IdentityProvider struct {
+			Alias       string            `json:"alias"`
+			DisplayName string            `json:"displayName"`
+			ProviderId  string            `json:"providerId"`
+			Enabled     bool              `json:"enabled"`
+			TrustEmail  bool              `json:"trustEmail"`
+			StoreToken  bool              `json:"storeToken"`
+			Config      map[string]string `json:"config"`
+		} `json:"identityProvider"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return &result, nil
+	// Convert response to IdentityProvider
+	result := &IdentityProvider{
+		Type:        idpType,
+		Alias:       response.IdentityProvider.Alias,
+		DisplayName: response.IdentityProvider.DisplayName,
+		Enabled:     response.IdentityProvider.Enabled,
+		Config:      make(map[string]interface{}),
+	}
+
+	// Convert config map from string to interface{}
+	for k, v := range response.IdentityProvider.Config {
+		result.Config[k] = v
+	}
+
+	return result, nil
 }
 
 func (c *Client) UpdateIdentityProvider(idpType, alias string, idp *IdentityProvider) (*IdentityProvider, error) {
-	body, err := c.doRequest("PUT", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), idp)
+	// Build request body based on IdP type - backend expects fields at top level, not nested in config
+	requestBody := make(map[string]interface{})
+
+	// Common fields
+	if idp.DisplayName != "" {
+		requestBody["displayName"] = idp.DisplayName
+	}
+	requestBody["enabled"] = idp.Enabled
+
+	// Extract config fields and add to top level based on type
+	switch idpType {
+	case "google":
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if hostedDomain, ok := idp.Config["hostedDomain"].(string); ok {
+			requestBody["hostedDomain"] = hostedDomain
+		}
+		requestBody["trustEmail"] = true
+		requestBody["storeToken"] = false
+		requestBody["addReadTokenRoleOnCreate"] = false
+		requestBody["syncMode"] = "FORCE"
+
+	case "microsoft":
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if tenantId, ok := idp.Config["tenantId"].(string); ok {
+			requestBody["tenantId"] = tenantId
+		}
+		requestBody["trustEmail"] = true
+		requestBody["storeToken"] = false
+		requestBody["syncMode"] = "FORCE"
+
+	case "keycloak":
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if authServerUrl, ok := idp.Config["authServerUrl"].(string); ok {
+			requestBody["authServerUrl"] = authServerUrl
+		}
+		if targetRealm, ok := idp.Config["targetRealm"].(string); ok {
+			requestBody["targetRealm"] = targetRealm
+		}
+
+	case "custom":
+		if clientId, ok := idp.Config["clientId"].(string); ok {
+			requestBody["clientId"] = clientId
+		}
+		if clientSecret, ok := idp.Config["clientSecret"].(string); ok {
+			requestBody["clientSecret"] = clientSecret
+		}
+		if authServerUrl, ok := idp.Config["authServerUrl"].(string); ok {
+			requestBody["authServerUrl"] = authServerUrl
+		}
+		if authorizationUrl, ok := idp.Config["authorizationUrl"].(string); ok {
+			requestBody["authorizationUrl"] = authorizationUrl
+		}
+		if tokenUrl, ok := idp.Config["tokenUrl"].(string); ok {
+			requestBody["tokenUrl"] = tokenUrl
+		}
+		if userInfoUrl, ok := idp.Config["userInfoUrl"].(string); ok {
+			requestBody["userInfoUrl"] = userInfoUrl
+		}
+		if logoutUrl, ok := idp.Config["logoutUrl"].(string); ok {
+			requestBody["logoutUrl"] = logoutUrl
+		}
+		if issuer, ok := idp.Config["issuer"].(string); ok {
+			requestBody["issuer"] = issuer
+		}
+		if providerName, ok := idp.Config["providerName"].(string); ok {
+			requestBody["providerName"] = providerName
+		}
+	}
+
+	// Backend endpoint is just /identity-providers/{type}, not with alias
+	body, err := c.doRequest("PUT", fmt.Sprintf("/identity-providers/%s", idpType), requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	var result IdentityProvider
-	if err := json.Unmarshal(body, &result); err != nil {
+	// Parse response - backend returns nested in "identityProvider" field
+	var response struct {
+		IdentityProvider struct {
+			Alias       string            `json:"alias"`
+			DisplayName string            `json:"displayName"`
+			ProviderId  string            `json:"providerId"`
+			Enabled     bool              `json:"enabled"`
+			TrustEmail  bool              `json:"trustEmail"`
+			StoreToken  bool              `json:"storeToken"`
+			Config      map[string]string `json:"config"`
+		} `json:"identityProvider"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return &result, nil
+	// Convert response to IdentityProvider
+	result := &IdentityProvider{
+		Type:        idpType,
+		Alias:       response.IdentityProvider.Alias,
+		DisplayName: response.IdentityProvider.DisplayName,
+		Enabled:     response.IdentityProvider.Enabled,
+		Config:      make(map[string]interface{}),
+	}
+
+	// Convert config map from string to interface{}
+	for k, v := range response.IdentityProvider.Config {
+		result.Config[k] = v
+	}
+
+	return result, nil
 }
 
 func (c *Client) DeleteIdentityProvider(idpType, alias string) error {
-	_, err := c.doRequest("DELETE", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), nil)
+	// Backend endpoint is just /identity-providers/{type}, not with alias
+	_, err := c.doRequest("DELETE", fmt.Sprintf("/identity-providers/%s", idpType), nil)
 	return err
 }
 

@@ -12,7 +12,7 @@ import (
 //go:generate go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
 
 var (
-	version string = "dev"
+	version string = "production"
 )
 
 func main() {

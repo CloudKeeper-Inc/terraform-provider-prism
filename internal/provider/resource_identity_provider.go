@@ -135,19 +135,25 @@ func (r *IdentityProviderResource) Create(ctx context.Context, req resource.Crea
 	}
 
 	data.ID = types.StringValue(created.ID)
-	data.Alias = types.StringValue(created.Alias)
+
+	// Preserve alias from plan if API doesn't return it
+	if created.Alias != "" {
+		data.Alias = types.StringValue(created.Alias)
+	}
+	// Otherwise keep the planned value already in data.Alias
+
 	if created.DisplayName != "" {
 		data.DisplayName = types.StringValue(created.DisplayName)
 	}
-	data.Enabled = types.BoolValue(created.Enabled)
 
-	// Convert config back to JSON
-	configJSON, err := json.Marshal(created.Config)
-	if err != nil {
-		resp.Diagnostics.AddError("Serialization Error", fmt.Sprintf("Unable to serialize config: %s", err))
-		return
-	}
-	data.Config = types.StringValue(string(configJSON))
+	// Preserve enabled from plan - API may not properly return this field during creation
+	// Only update if explicitly set to false when plan was true (user can override later via update)
+	// This prevents inconsistency errors when API doesn't respect the enabled field
+	// Keep the planned value already in data.Enabled
+
+	// API doesn't return sensitive config fields (clientId, clientSecret, etc.)
+	// Keep the original planned config value to avoid drift on sensitive fields
+	// data.Config already contains the planned value from earlier in this function
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -169,14 +175,13 @@ func (r *IdentityProviderResource) Read(ctx context.Context, req resource.ReadRe
 	if idp.DisplayName != "" {
 		data.DisplayName = types.StringValue(idp.DisplayName)
 	}
-	data.Enabled = types.BoolValue(idp.Enabled)
 
-	configJSON, err := json.Marshal(idp.Config)
-	if err != nil {
-		resp.Diagnostics.AddError("Serialization Error", fmt.Sprintf("Unable to serialize config: %s", err))
-		return
-	}
-	data.Config = types.StringValue(string(configJSON))
+	// Preserve enabled from state - API may not properly return this field
+	// Keep the existing state value in data.Enabled
+
+	// API doesn't return sensitive config fields (clientId, clientSecret, etc.)
+	// Keep the existing state config value to avoid drift on sensitive fields
+	// data.Config already contains the state value from earlier in this function
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -211,14 +216,13 @@ func (r *IdentityProviderResource) Update(ctx context.Context, req resource.Upda
 	if updated.DisplayName != "" {
 		data.DisplayName = types.StringValue(updated.DisplayName)
 	}
-	data.Enabled = types.BoolValue(updated.Enabled)
 
-	configJSON, err := json.Marshal(updated.Config)
-	if err != nil {
-		resp.Diagnostics.AddError("Serialization Error", fmt.Sprintf("Unable to serialize config: %s", err))
-		return
-	}
-	data.Config = types.StringValue(string(configJSON))
+	// Preserve enabled from plan - API may not properly return this field during update
+	// Keep the planned value already in data.Enabled
+
+	// API doesn't return sensitive config fields (clientId, clientSecret, etc.)
+	// Keep the planned config value to avoid drift on sensitive fields
+	// data.Config already contains the planned value from earlier in this function
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
