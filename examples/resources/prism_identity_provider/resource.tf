@@ -1,7 +1,6 @@
 # Google Identity Provider
 resource "prism_identity_provider" "google" {
   type         = "google"
-  alias        = "google"
   display_name = "Sign in with Google"
   enabled      = true
 
@@ -12,10 +11,14 @@ resource "prism_identity_provider" "google" {
   })
 }
 
+# Note: The alias is automatically computed by the backend based on type
+# For google: alias = "google"
+# For microsoft: alias = "microsoft"
+# For keycloak: alias = "keycloak"
+
 # Microsoft Azure AD Identity Provider
 resource "prism_identity_provider" "microsoft" {
   type         = "microsoft"
-  alias        = "azure-ad"
   display_name = "Sign in with Microsoft"
   enabled      = true
 

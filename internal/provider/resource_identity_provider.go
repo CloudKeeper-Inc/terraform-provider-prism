@@ -63,10 +63,10 @@ func (r *IdentityProviderResource) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"alias": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The alias/identifier for the identity provider",
+				Computed:            true,
+				MarkdownDescription: "The alias/identifier for the identity provider. This is automatically set by the backend based on the type (e.g., 'google' for Google, 'microsoft' for Microsoft).",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"display_name": schema.StringAttribute{
@@ -136,11 +136,9 @@ func (r *IdentityProviderResource) Create(ctx context.Context, req resource.Crea
 
 	data.ID = types.StringValue(created.ID)
 
-	// Preserve alias from plan if API doesn't return it
-	if created.Alias != "" {
-		data.Alias = types.StringValue(created.Alias)
-	}
-	// Otherwise keep the planned value already in data.Alias
+	// Always use the alias returned by the API - it's auto-generated based on type
+	// Backend hardcodes: google -> "google", microsoft -> "microsoft", etc.
+	data.Alias = types.StringValue(created.Alias)
 
 	if created.DisplayName != "" {
 		data.DisplayName = types.StringValue(created.DisplayName)
