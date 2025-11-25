@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -77,6 +78,9 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 		reqBody = bytes.NewBuffer(jsonBody)
 	}
 
+	if !strings.HasPrefix(c.BaseURL, "https://") {
+		c.BaseURL = "https://" + c.BaseURL
+	}
 	url := fmt.Sprintf("%s/api/v1/customers/%s%s", c.BaseURL, c.PrismSubdomain, path)
 	req, err := http.NewRequest(method, url, reqBody)
 	if err != nil {

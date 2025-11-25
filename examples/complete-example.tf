@@ -12,6 +12,7 @@ terraform {
 
 provider "prism" {
   prism_subdomain = var.prism_subdomain
+  base_url        = var.prism_base_url
   api_token       = var.prism_token
 }
 
@@ -21,10 +22,14 @@ variable "prism_token" {
   sensitive   = true
 }
 
+variable "prism_base_url" {
+  type        = string
+  description = "Prism base URL (e.g., https://prism.cloudkeeper.com)"
+}
+
 variable "prism_subdomain" {
   type        = string
-  description = "Prism subdomain. This can be found in the Prism URL of your tenant - https://{prism_subdomain}.prism.cloudkeeper.com"
-  sensitive   = false
+  description = "CloudKeeper Prism subdomain. (Can be found in https://{subdomain}prism.cloudkeeper.com)"
 }
 
 # ============= AWS Accounts =============

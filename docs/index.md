@@ -33,18 +33,31 @@ terraform {
 # Configure the CloudKeeper Prism Provider
 provider "prism" {
   # Subdomain for your CloudKeeper Prism instance
-  # Example: if your URL is https://acme.prism.cloudkeeper.com, use "acme"
-  prism_subdomain = "your-subdomain"
+  prism_subdomain = var.prism_subdomain
+
+  # Base URL for your Prism instance (without port)
+  # The port 8090 is automatically appended
+  base_url = var.prism_base_url
 
   # API token for authentication
   # Best practice: use environment variable PRISM_API_TOKEN or a variable
   api_token = var.prism_api_token
 }
 
+variable "prism_subdomain" {
+  type        = string
+  description = "CloudKeeper Prism subdomain"
+}
+
 variable "prism_api_token" {
   type        = string
   description = "CloudKeeper Prism API token"
   sensitive   = true
+}
+
+variable "prism_base_url" {
+  type        = string
+  description = "CloudKeeper Prism base URL (e.g., https://prism.cloudkeeper.com)"
 }
 ```
 
@@ -59,6 +72,7 @@ You can provide credentials via environment variables:
 ```shell
 export PRISM_SUBDOMAIN="your-subdomain"
 export PRISM_API_TOKEN="your-api-token"
+export PRISM_BASE_URL="https://prism.cloudkeeper.com"
 ```
 
 ### Configuration
@@ -69,6 +83,7 @@ Alternatively, you can specify credentials directly in the provider configuratio
 provider "prism" {
   prism_subdomain = "your-subdomain"
   api_token       = "your-api-token"
+  prism_base_url = "https://prism.cloudkeeper.com"
 }
 ```
 
@@ -80,8 +95,8 @@ provider "prism" {
 ### Optional
 
 - `api_token` (String, Sensitive) The API token for authentication with CloudKeeper. Can also be set via the `PRISM_API_TOKEN` environment variable.
-- `prism_subdomain` (String) The Prism subdomain for CloudKeeper API paths. Can also be set via the `PRISM_SUBDOMAIN` environment variable.
-- `region` (String) The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Can also be set via the `PRISM_REGION` environment variable.
+- `base_url` (String) The base URL for the Prism API endpoint (e.g., `https://prism.cloudkeeper.com` or `https://myprism.xyz.in`). The port 8090 is automatically appended. Can also be set via the `PRISM_BASE_URL` environment variable.
+- `prism_subdomain` (String) The Prism subdomain for CloudKeeper API paths (e.g., `https://sso.prism.cloudkeeper.com`). Can also be set via the `PRISM_SUBDOMAIN` environment variable.
 
 ## Getting Started
 

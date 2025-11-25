@@ -2,16 +2,14 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -27,7 +25,7 @@ type CloudKeeperProvider struct {
 type CloudKeeperProviderModel struct {
 	PrismSubdomain types.String `tfsdk:"prism_subdomain"`
 	APIToken       types.String `tfsdk:"api_token"`
-	Region         types.String `tfsdk:"region"`
+	BaseURL        types.String `tfsdk:"base_url"`
 }
 
 // New creates a new provider instance
@@ -48,11 +46,11 @@ func (p *CloudKeeperProvider) Metadata(ctx context.Context, req provider.Metadat
 // Schema defines the provider-level schema for configuration data.
 func (p *CloudKeeperProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "The CloudKeeper provider is used to interact with CloudKeeper-Auth resources. " +
+		MarkdownDescription: "The CloudKeeper provider is used to interact with CloudKeeper Prism resources. " +
 			"The provider needs to be configured with the proper credentials before it can be used.",
 		Attributes: map[string]schema.Attribute{
 			"prism_subdomain": schema.StringAttribute{
-				MarkdownDescription: "The Prism subdomain for CloudKeeper API paths. Can also be set via the `PRISM_SUBDOMAIN` environment variable.",
+				MarkdownDescription: "The Prism subdomain for CloudKeeper API paths (e.g., `https://sso.prism.cloudkeeper.com`). Can also be set via the `PRISM_SUBDOMAIN` environment variable.",
 				Optional:            true,
 			},
 			"api_token": schema.StringAttribute{
@@ -60,12 +58,9 @@ func (p *CloudKeeperProvider) Schema(ctx context.Context, req provider.SchemaReq
 				Optional:            true,
 				Sensitive:           true,
 			},
-			"region": schema.StringAttribute{
-				MarkdownDescription: "The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Can also be set via the `PRISM_REGION` environment variable.",
+			"base_url": schema.StringAttribute{
+				MarkdownDescription: "The base URL for the Prism API endpoint (e.g., `https://prism.cloudkeeper.com`). The port 8090 is automatically appended. Can also be set via the `PRISM_BASE_URL` environment variable.",
 				Optional:            true,
-				Validators: []validator.String{
-					stringvalidator.OneOf("prism", "prism-eu"),
-				},
 			},
 		},
 	}
@@ -113,7 +108,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 
 	prismSubdomain := os.Getenv("PRISM_SUBDOMAIN")
 	apiToken := os.Getenv("PRISM_API_TOKEN")
-	region := os.Getenv("PRISM_REGION")
+	baseURL := os.Getenv("PRISM_BASE_URL")
 
 	if !data.PrismSubdomain.IsNull() {
 		prismSubdomain = data.PrismSubdomain.ValueString()
@@ -123,13 +118,8 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 		apiToken = data.APIToken.ValueString()
 	}
 
-	if !data.Region.IsNull() {
-		region = data.Region.ValueString()
-	}
-
-	// Default region to "prism" if not set
-	if region == "" {
-		region = "prism"
+	if !data.BaseURL.IsNull() {
+		baseURL = data.BaseURL.ValueString()
 	}
 
 	// If any of the expected configurations are missing, return
@@ -155,15 +145,26 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 		)
 	}
 
+	if baseURL == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("base_url"),
+			"Missing CloudKeeper Prism Base URL",
+			"The provider cannot create the CloudKeeper API client as there is a missing or empty value for the CloudKeeper Prism base URL. "+
+				"Set the base_url value in the configuration or use the PRISM_BASE_URL environment variable. "+
+				"Example: https://prism.cloudkeeper.com",
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	// Build the base URL from the region
-	baseUrl := fmt.Sprintf("https://%s.cloudkeeper.com:8090", region)
+	// Ensure base URL doesn't have trailing slash and append port
+	baseURL = strings.TrimSuffix(baseURL, "/")
+	finalBaseURL := baseURL + ":8090"
 
 	// Create a new CloudKeeper client using the configuration values
-	client := NewClient(baseUrl, prismSubdomain, apiToken)
+	client := NewClient(finalBaseURL, prismSubdomain, apiToken)
 
 	// Make the CloudKeeper client available during DataSource and Resource
 	// type Configure methods.

@@ -35,8 +35,9 @@ terraform {
 }
 
 provider "prism" {
-  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
-  api_token = var.prism_token
+  prism_subdomain = var.prism_subdomain
+  base_url        = var.prism_base_url
+  api_token       = var.prism_token
 }
 ```
 
@@ -67,9 +68,10 @@ provider_installation {
 
 ```hcl
 # Configure the provider
-provider "cloudkeeper" {
-  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
-  api_token = var.prism_token
+provider "prism" {
+  prism_subdomain = var.prism_subdomain
+  base_url        = var.prism_base_url
+  api_token       = var.prism_token
 }
 
 # Onboard an AWS account
@@ -154,28 +156,34 @@ resource "prism_identity_provider" "google" {
 ### Environment Variables
 
 - `PRISM_SUBDOMAIN`: CloudKeeper Prism subdomain
+- `PRISM_BASE_URL`: Base URL for the Prism API (e.g., `https://prism.cloudkeeper.com`)
 - `PRISM_API_TOKEN`: API authentication token
-- `PRISM_REGION`: API region (`prism` or `prism-eu`, defaults to `prism`)
 
 ### Provider Arguments
 
-- `prism_subdomain` (Optional, String): The subdomain of your tenant in CloudKeeper Prism. Can also be set via `PRISM_SUBDOMAIN` environment variable.
-- `api_token` (Optional, String, Sensitive): The API token for authentication. Can also be set via `PRISM_API_TOKEN` environment variable.
-- `region` (Optional, String): The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Only required for EU region users. Can also be set via `PRISM_REGION` environment variable.
+- `prism_subdomain` (Required, String): The subdomain of your tenant in CloudKeeper Prism. Can also be set via `PRISM_SUBDOMAIN` environment variable.
+- `base_url` (Required, String): The base URL for the Prism API endpoint (e.g., `https://prism.cloudkeeper.com`). The port 8090 is automatically appended. Can also be set via `PRISM_BASE_URL` environment variable.
+- `api_token` (Required, String, Sensitive): The API token for authentication. Can also be set via `PRISM_API_TOKEN` environment variable.
 
-### EU Region Configuration
-
-If your Prism instance is hosted in the EU region, you must specify the `region` attribute:
+### Example Configuration
 
 ```hcl
 provider "prism" {
-  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
+  prism_subdomain = "your-subdomain"
+  base_url        = "https://prism.cloudkeeper.com"
   api_token       = var.prism_token
-  region          = "prism-eu"
 }
 ```
 
-For non-EU users, the `region` attribute can be omitted (defaults to `prism`).
+For EU region, use the EU base URL:
+
+```hcl
+provider "prism" {
+  prism_subdomain = "your-subdomain"
+  base_url        = "https://prism-eu.cloudkeeper.com"
+  api_token       = var.prism_token
+}
+```
 
 ## Resources
 
@@ -291,26 +299,7 @@ If you have existing Prism infrastructure that you want to manage with Terraform
 
 ### Quick Start
 
-```bash
-# Generate Terraform code from existing infrastructure
-make generate-terraform SUBDOMAIN=your-subdomain TOKEN=your-api-token
-
-# Navigate to generated directory
-cd generated-terraform
-
-# Review generated files
-ls -la
-
-# Initialize Terraform
-terraform init
-
-# Import existing resources into state
-chmod +x import.sh
-./import.sh
-
-# Verify everything matches
-terraform plan
-```
+See `tools/terraform-import/README.md` for the import tool documentation.
 
 ### Features
 
