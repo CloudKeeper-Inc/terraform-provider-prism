@@ -37,3 +37,4 @@ generated-terraform/
 
 # AI Pair Programming
 .claude/
+CLAUDE.md

@@ -2,13 +2,16 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -24,6 +27,7 @@ type CloudKeeperProvider struct {
 type CloudKeeperProviderModel struct {
 	PrismSubdomain types.String `tfsdk:"prism_subdomain"`
 	APIToken       types.String `tfsdk:"api_token"`
+	Region         types.String `tfsdk:"region"`
 }
 
 // New creates a new provider instance
@@ -55,6 +59,13 @@ func (p *CloudKeeperProvider) Schema(ctx context.Context, req provider.SchemaReq
 				MarkdownDescription: "The API token for authentication with CloudKeeper. Can also be set via the `PRISM_API_TOKEN` environment variable.",
 				Optional:            true,
 				Sensitive:           true,
+			},
+			"region": schema.StringAttribute{
+				MarkdownDescription: "The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Can also be set via the `PRISM_REGION` environment variable.",
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("prism", "prism-eu"),
+				},
 			},
 		},
 	}
@@ -102,6 +113,7 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 
 	prismSubdomain := os.Getenv("PRISM_SUBDOMAIN")
 	apiToken := os.Getenv("PRISM_API_TOKEN")
+	region := os.Getenv("PRISM_REGION")
 
 	if !data.PrismSubdomain.IsNull() {
 		prismSubdomain = data.PrismSubdomain.ValueString()
@@ -109,6 +121,15 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 
 	if !data.APIToken.IsNull() {
 		apiToken = data.APIToken.ValueString()
+	}
+
+	if !data.Region.IsNull() {
+		region = data.Region.ValueString()
+	}
+
+	// Default region to "prism" if not set
+	if region == "" {
+		region = "prism"
 	}
 
 	// If any of the expected configurations are missing, return
@@ -138,8 +159,8 @@ func (p *CloudKeeperProvider) Configure(ctx context.Context, req provider.Config
 		return
 	}
 
-	// to change to https://prism.cloudkeeper.com:8090 upon production release
-	var baseUrl = "https://auth.cloudkeeper.com:8090"
+	// Build the base URL from the region
+	baseUrl := fmt.Sprintf("https://%s.cloudkeeper.com:8090", region)
 
 	// Create a new CloudKeeper client using the configuration values
 	client := NewClient(baseUrl, prismSubdomain, apiToken)

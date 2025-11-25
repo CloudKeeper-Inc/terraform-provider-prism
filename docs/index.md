@@ -81,6 +81,7 @@ provider "prism" {
 
 - `api_token` (String, Sensitive) The API token for authentication with CloudKeeper. Can also be set via the `PRISM_API_TOKEN` environment variable.
 - `prism_subdomain` (String) The Prism subdomain for CloudKeeper API paths. Can also be set via the `PRISM_SUBDOMAIN` environment variable.
+- `region` (String) The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Can also be set via the `PRISM_REGION` environment variable.
 
 ## Getting Started
 

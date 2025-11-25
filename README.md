@@ -155,11 +155,27 @@ resource "prism_identity_provider" "google" {
 
 - `PRISM_SUBDOMAIN`: CloudKeeper Prism subdomain
 - `PRISM_API_TOKEN`: API authentication token
+- `PRISM_REGION`: API region (`prism` or `prism-eu`, defaults to `prism`)
 
 ### Provider Arguments
 
 - `prism_subdomain` (Optional, String): The subdomain of your tenant in CloudKeeper Prism. Can also be set via `PRISM_SUBDOMAIN` environment variable.
 - `api_token` (Optional, String, Sensitive): The API token for authentication. Can also be set via `PRISM_API_TOKEN` environment variable.
+- `region` (Optional, String): The region for the Prism API endpoint. Must be either `prism` (default) or `prism-eu`. Only required for EU region users. Can also be set via `PRISM_REGION` environment variable.
+
+### EU Region Configuration
+
+If your Prism instance is hosted in the EU region, you must specify the `region` attribute:
+
+```hcl
+provider "prism" {
+  prism_subdomain = "YOUR_PRISM_SUBDOMAIN"
+  api_token       = var.prism_token
+  region          = "prism-eu"
+}
+```
+
+For non-EU users, the `region` attribute can be omitted (defaults to `prism`).
 
 ## Resources
 
