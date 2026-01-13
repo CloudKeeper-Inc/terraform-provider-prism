@@ -24,7 +24,7 @@ func NewClient(baseURL, prismSubdomain, token string) *Client {
 		BaseURL:        baseURL,
 		PrismSubdomain: prismSubdomain,
 		HTTPClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 120 * time.Second,
 		},
 		Token: token,
 	}
@@ -139,12 +139,13 @@ func unwrapAPIResponse(body []byte) ([]byte, error) {
 // ========== AWS Account Operations ==========
 
 type AWSAccount struct {
-	ID          string `json:"id,omitempty"`
-	CustomerID  string `json:"customer_id,omitempty"`
-	AccountID   string `json:"account_id"`
-	AccountName string `json:"name"`
-	Region      string `json:"region,omitempty"`
-	RoleArn     string `json:"role_arn,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	CustomerID  string   `json:"customer_id,omitempty"`
+	AccountID   string   `json:"account_id"`
+	AccountName string   `json:"name"`
+	Region      string   `json:"region,omitempty"`
+	RoleArn     string   `json:"role_arn,omitempty"`
+	OwnerEmails []string `json:"owner_emails,omitempty"`
 }
 
 func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
@@ -152,6 +153,11 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 	requestBody := map[string]interface{}{
 		"accountId":   account.AccountID,
 		"accountName": account.AccountName,
+	}
+
+	// Include owner_emails if provided
+	if len(account.OwnerEmails) > 0 {
+		requestBody["ownerEmails"] = account.OwnerEmails
 	}
 
 	body, err := c.doRequest("POST", "/accounts/onboard", requestBody)
@@ -162,12 +168,13 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 	// The onboard endpoint returns a complex structure with the account nested
 	var response struct {
 		Account struct {
-			ID        string `json:"id"`
-			AccountID string `json:"account_id"`
-			Name      string `json:"name"`
-			Status    string `json:"status"`
-			Region    string `json:"region,omitempty"`
-			RoleArn   string `json:"role_arn,omitempty"`
+			ID          string   `json:"id"`
+			AccountID   string   `json:"account_id"`
+			Name        string   `json:"name"`
+			Status      string   `json:"status"`
+			Region      string   `json:"region,omitempty"`
+			RoleArn     string   `json:"role_arn,omitempty"`
+			OwnerEmails []string `json:"owner_emails,omitempty"`
 		} `json:"account"`
 	}
 
@@ -182,6 +189,7 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 		AccountName: response.Account.Name,
 		Region:      response.Account.Region,
 		RoleArn:     response.Account.RoleArn,
+		OwnerEmails: response.Account.OwnerEmails,
 	}
 
 	return result, nil

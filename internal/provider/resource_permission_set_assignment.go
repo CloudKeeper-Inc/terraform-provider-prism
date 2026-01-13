@@ -219,10 +219,12 @@ func (r *PermissionSetAssignmentResource) Read(ctx context.Context, req resource
 		return
 	}
 
-	// Check if each assignment still exists by trying to get it
-	existingCount := 0
+	// Track existing assignments and collect account IDs
+	var existingAssignments []*PermissionSetAssignment
+	var accountIDs []string
+
 	for _, assignmentID := range assignmentIDs {
-		_, err := r.client.GetPermissionSetAssignment(assignmentID)
+		assignment, err := r.client.GetPermissionSetAssignment(assignmentID)
 		if err != nil {
 			// If 404 or not found, skip it
 			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
@@ -235,25 +237,44 @@ func (r *PermissionSetAssignmentResource) Read(ctx context.Context, req resource
 			)
 			continue
 		}
-		existingCount++
+		existingAssignments = append(existingAssignments, assignment)
+		accountIDs = append(accountIDs, assignment.AccountID)
 	}
 
 	// If none of the assignments exist, remove from state
-	if existingCount == 0 {
+	if len(existingAssignments) == 0 {
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
 	// If some but not all assignments exist, that's unusual but we keep the resource
-	// The user can destroy and recreate if needed
-	if existingCount < len(assignmentIDs) {
+	if len(existingAssignments) < len(assignmentIDs) {
 		resp.Diagnostics.AddWarning(
 			"Partial Assignment Drift",
-			fmt.Sprintf("Only %d of %d assignments still exist. Some may have been deleted outside Terraform.", existingCount, len(assignmentIDs)),
+			fmt.Sprintf("Only %d of %d assignments still exist. Some may have been deleted outside Terraform.", len(existingAssignments), len(assignmentIDs)),
 		)
 	}
 
-	// Keep the state as is - we don't update individual fields since they're inputs
+	// Populate state from the first existing assignment (they should all have same permission_set, principal)
+	firstAssignment := existingAssignments[0]
+	data.PermissionSetID = types.StringValue(firstAssignment.PermissionSetID)
+	data.PrincipalType = types.StringValue(firstAssignment.PrincipalType)
+
+	// Set principal_id based on type
+	if firstAssignment.PrincipalType == "USER" {
+		data.PrincipalID = types.StringValue(firstAssignment.Username)
+	} else {
+		data.PrincipalID = types.StringValue(firstAssignment.GroupName)
+	}
+
+	// Set account_ids from all existing assignments
+	accountIDsValues, diags := types.ListValueFrom(ctx, types.StringType, accountIDs)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	data.AccountIDs = accountIDsValues
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 

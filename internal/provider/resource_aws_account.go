@@ -31,6 +31,7 @@ type AWSAccountResourceModel struct {
 	AccountName types.String `tfsdk:"account_name"`
 	Region      types.String `tfsdk:"region"`
 	RoleArn     types.String `tfsdk:"role_arn"`
+	OwnerEmails types.List   `tfsdk:"owner_emails"`
 }
 
 func (r *AWSAccountResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -69,6 +70,11 @@ func (r *AWSAccountResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Computed:            true,
 				MarkdownDescription: "The ARN of the IAM role used for cross-account access",
 			},
+			"owner_emails": schema.ListAttribute{
+				Optional:            true,
+				ElementType:         types.StringType,
+				MarkdownDescription: "List of owner email addresses for JIT (Just-In-Time) access approvals",
+			},
 		},
 	}
 }
@@ -98,11 +104,22 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	// Convert owner_emails from types.List to []string
+	var ownerEmails []string
+	if !data.OwnerEmails.IsNull() && !data.OwnerEmails.IsUnknown() {
+		diags := data.OwnerEmails.ElementsAs(ctx, &ownerEmails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	account := &AWSAccount{
 		AccountID:   data.AccountID.ValueString(),
 		AccountName: data.AccountName.ValueString(),
 		Region:      data.Region.ValueString(),
 		RoleArn:     data.RoleArn.ValueString(),
+		OwnerEmails: ownerEmails,
 	}
 
 	created, err := r.client.CreateAWSAccount(account)
@@ -136,6 +153,18 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		// Compute default role ARN if not provided
 		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
 		data.RoleArn = types.StringValue(defaultRoleArn)
+	}
+
+	// Set owner_emails from API response
+	if len(created.OwnerEmails) > 0 {
+		ownerEmailsList, diags := types.ListValueFrom(ctx, types.StringType, created.OwnerEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.OwnerEmails = ownerEmailsList
+	} else {
+		data.OwnerEmails = types.ListNull(types.StringType)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -174,6 +203,18 @@ func (r *AWSAccountResource) Read(ctx context.Context, req resource.ReadRequest,
 		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
+	// Set owner_emails from API response
+	if len(account.OwnerEmails) > 0 {
+		ownerEmailsList, diags := types.ListValueFrom(ctx, types.StringType, account.OwnerEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.OwnerEmails = ownerEmailsList
+	} else {
+		data.OwnerEmails = types.ListNull(types.StringType)
+	}
+
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
@@ -185,11 +226,22 @@ func (r *AWSAccountResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
+	// Convert owner_emails from types.List to []string
+	var ownerEmails []string
+	if !data.OwnerEmails.IsNull() && !data.OwnerEmails.IsUnknown() {
+		diags := data.OwnerEmails.ElementsAs(ctx, &ownerEmails, false)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	account := &AWSAccount{
 		AccountID:   data.AccountID.ValueString(),
 		AccountName: data.AccountName.ValueString(),
 		Region:      data.Region.ValueString(),
 		RoleArn:     data.RoleArn.ValueString(),
+		OwnerEmails: ownerEmails,
 	}
 
 	updated, err := r.client.UpdateAWSAccount(data.AccountID.ValueString(), account)
@@ -215,6 +267,18 @@ func (r *AWSAccountResource) Update(ctx context.Context, req resource.UpdateRequ
 		// Compute default role ARN
 		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
 		data.RoleArn = types.StringValue(defaultRoleArn)
+	}
+
+	// Set owner_emails from API response
+	if len(updated.OwnerEmails) > 0 {
+		ownerEmailsList, diags := types.ListValueFrom(ctx, types.StringType, updated.OwnerEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.OwnerEmails = ownerEmailsList
+	} else {
+		data.OwnerEmails = types.ListNull(types.StringType)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -326,5 +390,6 @@ func (r *AWSAccountResource) Delete(ctx context.Context, req resource.DeleteRequ
 }
 
 func (r *AWSAccountResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Import using account_id (AWS account ID) since that's what Read() uses to fetch the account
+	resource.ImportStatePassthroughID(ctx, path.Root("account_id"), req, resp)
 }

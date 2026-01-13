@@ -191,5 +191,6 @@ func (r *GroupResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 }
 
 func (r *GroupResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Import using name since that's what Read() uses to fetch the group
+	resource.ImportStatePassthroughID(ctx, path.Root("name"), req, resp)
 }

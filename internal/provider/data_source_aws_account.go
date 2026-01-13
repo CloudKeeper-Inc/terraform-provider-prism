@@ -25,6 +25,7 @@ type AWSAccountDataSourceModel struct {
 	AccountName types.String `tfsdk:"account_name"`
 	Region      types.String `tfsdk:"region"`
 	RoleArn     types.String `tfsdk:"role_arn"`
+	OwnerEmails types.List   `tfsdk:"owner_emails"`
 }
 
 func (d *AWSAccountDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -55,6 +56,11 @@ func (d *AWSAccountDataSource) Schema(ctx context.Context, req datasource.Schema
 			"role_arn": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "The ARN of the IAM role used for cross-account access",
+			},
+			"owner_emails": schema.ListAttribute{
+				Computed:            true,
+				ElementType:         types.StringType,
+				MarkdownDescription: "List of owner email addresses for JIT (Just-In-Time) access approvals",
 			},
 		},
 	}
@@ -98,6 +104,18 @@ func (d *AWSAccountDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 	if account.RoleArn != "" {
 		data.RoleArn = types.StringValue(account.RoleArn)
+	}
+
+	// Set owner_emails from API response
+	if len(account.OwnerEmails) > 0 {
+		ownerEmailsList, diags := types.ListValueFrom(ctx, types.StringType, account.OwnerEmails)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.OwnerEmails = ownerEmailsList
+	} else {
+		data.OwnerEmails = types.ListNull(types.StringType)
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
