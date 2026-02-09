@@ -6,9 +6,35 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// Global counter for API call sequence tracking
+var apiCallCounter int64
+var apiStartTime = time.Now()
+
+// First request serialization mechanism
+// Ensures the first API request completes before allowing parallel requests,
+// giving the backend time to cache token details.
+var (
+	firstRequestOnce sync.Once
+	firstRequestDone = make(chan struct{})
+)
+
+// signalFirstRequestComplete signals that the first request has completed.
+// Safe to call multiple times (only first call has effect).
+func signalFirstRequestComplete() {
+	select {
+	case <-firstRequestDone:
+		// Already closed
+	default:
+		close(firstRequestDone)
+	}
+}
 
 // Client is the CloudKeeper API client
 type Client struct {
@@ -32,6 +58,18 @@ func NewClient(baseURL, prismSubdomain, token string) *Client {
 
 // doRequestRaw performs an HTTP request without customer path prefix
 func (c *Client) doRequestRaw(method, path string, body interface{}) ([]byte, error) {
+	// First request serialization - ensure first request completes before others proceed
+	isFirst := false
+	firstRequestOnce.Do(func() {
+		isFirst = true
+	})
+	if !isFirst {
+		// Wait for first request to complete
+		<-firstRequestDone
+	}
+	// Signal completion when done (only effective for first request)
+	defer signalFirstRequestComplete()
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -49,7 +87,12 @@ func (c *Client) doRequestRaw(method, path string, body interface{}) ([]byte, er
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Token", c.Token)
 
+	callNum := atomic.AddInt64(&apiCallCounter, 1)
+	sinceStart := time.Since(apiStartTime)
+	startTime := time.Now()
 	resp, err := c.HTTPClient.Do(req)
+	elapsed := time.Since(startTime)
+	fmt.Fprintf(os.Stderr, "[API TIMING] #%d @%.2fs | %s %s | Response: %v\n", callNum, sinceStart.Seconds(), method, c.BaseURL+path, elapsed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
@@ -69,6 +112,18 @@ func (c *Client) doRequestRaw(method, path string, body interface{}) ([]byte, er
 
 // doRequest performs an HTTP request with customer path prefix and unwraps the API response
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
+	// First request serialization - ensure first request completes before others proceed
+	isFirst := false
+	firstRequestOnce.Do(func() {
+		isFirst = true
+	})
+	if !isFirst {
+		// Wait for first request to complete
+		<-firstRequestDone
+	}
+	// Signal completion when done (only effective for first request)
+	defer signalFirstRequestComplete()
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -90,7 +145,12 @@ func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Token", c.Token)
 
+	callNum := atomic.AddInt64(&apiCallCounter, 1)
+	sinceStart := time.Since(apiStartTime)
+	startTime := time.Now()
 	resp, err := c.HTTPClient.Do(req)
+	elapsed := time.Since(startTime)
+	fmt.Fprintf(os.Stderr, "[API TIMING] #%d @%.2fs | %s %s | Response: %v\n", callNum, sinceStart.Seconds(), method, url, elapsed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}

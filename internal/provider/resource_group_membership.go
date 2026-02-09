@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -116,6 +117,9 @@ func (r *GroupMembershipResource) Read(ctx context.Context, req resource.ReadReq
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read group members, got error: %s", err))
 		return
 	}
+
+	// Sort members alphabetically to ensure consistent ordering
+	sort.Strings(members)
 
 	usernamesList, diags := types.ListValueFrom(ctx, types.StringType, members)
 	resp.Diagnostics.Append(diags...)

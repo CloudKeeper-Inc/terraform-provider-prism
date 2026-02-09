@@ -103,14 +103,8 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	data.ID = types.StringValue(created.ID)
 	data.Name = types.StringValue(created.Name)
-	// Only update description if API returned a non-empty value
-	if created.Description != "" {
-		data.Description = types.StringValue(created.Description)
-	}
-	// Only update path if API returned a non-empty value
-	if created.Path != "" {
-		data.Path = types.StringValue(created.Path)
-	}
+	data.Description = types.StringValue(created.Description)
+	data.Path = types.StringValue(created.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -130,14 +124,8 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	data.Name = types.StringValue(group.Name)
-	// Only update description if API returned a non-empty value
-	if group.Description != "" {
-		data.Description = types.StringValue(group.Description)
-	}
-	// Only update path if API returned a non-empty value
-	if group.Path != "" {
-		data.Path = types.StringValue(group.Path)
-	}
+	data.Description = types.StringValue(group.Description)
+	data.Path = types.StringValue(group.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -163,14 +151,8 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	data.Name = types.StringValue(updated.Name)
-	// Only update description if API returned a non-empty value
-	if updated.Description != "" {
-		data.Description = types.StringValue(updated.Description)
-	}
-	// Only update path if API returned a non-empty value
-	if updated.Path != "" {
-		data.Path = types.StringValue(updated.Path)
-	}
+	data.Description = types.StringValue(updated.Description)
+	data.Path = types.StringValue(updated.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
