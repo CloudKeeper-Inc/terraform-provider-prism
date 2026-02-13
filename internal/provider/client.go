@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -960,4 +961,54 @@ func (c *Client) ListIdentityProviders() ([]IdentityProvider, error) {
 	}
 
 	return result, nil
+}
+
+// ========== Dependency Waiting Utilities ==========
+
+// isDependencyNotFoundError checks if an error indicates a resource does not yet exist.
+func isDependencyNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "404") || strings.Contains(strings.ToLower(msg), "not found")
+}
+
+// waitForDependency polls checkFunc every 2s for up to 60s until the dependency exists.
+// Returns nil immediately if the dependency is found on the first check.
+// Returns immediately on non-404 errors. Times out with a descriptive error.
+func waitForDependency(ctx context.Context, resourceType, resourceID string, checkFunc func() error) error {
+	const maxWait = 60 * time.Second
+	const pollInterval = 2 * time.Second
+
+	err := checkFunc()
+	if err == nil {
+		return nil
+	}
+	if !isDependencyNotFoundError(err) {
+		return fmt.Errorf("error checking %s %q: %w", resourceType, resourceID, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "[DEPENDENCY WAIT] %s %q not found, polling for up to %s...\n", resourceType, resourceID, maxWait)
+
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for %s %q", resourceType, resourceID)
+		case <-time.After(pollInterval):
+		}
+
+		err = checkFunc()
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "[DEPENDENCY WAIT] %s %q is now available\n", resourceType, resourceID)
+			return nil
+		}
+		if !isDependencyNotFoundError(err) {
+			return fmt.Errorf("error checking %s %q: %w", resourceType, resourceID, err)
+		}
+		fmt.Fprintf(os.Stderr, "[DEPENDENCY WAIT] %s %q still not found, retrying...\n", resourceType, resourceID)
+	}
+
+	return fmt.Errorf("timed out after %s waiting for %s %q to become available", maxWait, resourceType, resourceID)
 }

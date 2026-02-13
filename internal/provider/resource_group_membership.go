@@ -93,6 +93,26 @@ func (r *GroupMembershipResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	// Wait for dependencies to become available before creating
+	groupName := data.GroupName.ValueString()
+	if err := waitForDependency(ctx, "group", groupName, func() error {
+		_, err := r.client.GetGroup(groupName)
+		return err
+	}); err != nil {
+		resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("Group dependency not satisfied: %s", err))
+		return
+	}
+
+	for _, username := range usernames {
+		if err := waitForDependency(ctx, "user", username, func() error {
+			_, err := r.client.GetUser(username)
+			return err
+		}); err != nil {
+			resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("User dependency not satisfied: %s", err))
+			return
+		}
+	}
+
 	err := r.client.AddGroupMembers(data.GroupName.ValueString(), usernames)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to add group members, got error: %s", err))
@@ -174,6 +194,17 @@ func (r *GroupMembershipResource) Update(ctx context.Context, req resource.Updat
 		}
 		if !found {
 			toRemove = append(toRemove, stateUsername)
+		}
+	}
+
+	// Wait for new user dependencies before adding
+	for _, username := range toAdd {
+		if err := waitForDependency(ctx, "user", username, func() error {
+			_, err := r.client.GetUser(username)
+			return err
+		}); err != nil {
+			resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("User dependency not satisfied: %s", err))
+			return
 		}
 	}
 

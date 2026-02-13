@@ -128,6 +128,46 @@ func (r *PermissionSetAssignmentResource) Create(ctx context.Context, req resour
 		assignment.GroupName = data.PrincipalID.ValueString()
 	}
 
+	// Wait for dependencies to become available before creating
+	permSetID := data.PermissionSetID.ValueString()
+	if err := waitForDependency(ctx, "permission_set", permSetID, func() error {
+		_, err := r.client.GetPermissionSet(permSetID)
+		return err
+	}); err != nil {
+		resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("Permission set dependency not satisfied: %s", err))
+		return
+	}
+
+	for _, acctID := range accountIDs {
+		if err := waitForDependency(ctx, "aws_account", acctID, func() error {
+			_, err := r.client.GetAWSAccount(acctID)
+			return err
+		}); err != nil {
+			resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("AWS account dependency not satisfied: %s", err))
+			return
+		}
+	}
+
+	principalID := data.PrincipalID.ValueString()
+	principalType := data.PrincipalType.ValueString()
+	if principalType == "USER" {
+		if err := waitForDependency(ctx, "user", principalID, func() error {
+			_, err := r.client.GetUser(principalID)
+			return err
+		}); err != nil {
+			resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("User dependency not satisfied: %s", err))
+			return
+		}
+	} else if principalType == "GROUP" {
+		if err := waitForDependency(ctx, "group", principalID, func() error {
+			_, err := r.client.GetGroup(principalID)
+			return err
+		}); err != nil {
+			resp.Diagnostics.AddError("Dependency Error", fmt.Sprintf("Group dependency not satisfied: %s", err))
+			return
+		}
+	}
+
 	_, err := r.client.CreatePermissionSetAssignment(assignment)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create permission set assignment, got error: %s", err))
@@ -144,9 +184,6 @@ func (r *PermissionSetAssignmentResource) Create(ctx context.Context, req resour
 	}
 
 	// Find the assignments we just created by matching all criteria
-	principalID := data.PrincipalID.ValueString()
-	permSetID := data.PermissionSetID.ValueString()
-	principalType := data.PrincipalType.ValueString()
 
 	var createdAssignmentIDs []string
 	for _, acctID := range accountIDs {
