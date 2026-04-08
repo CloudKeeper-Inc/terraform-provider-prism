@@ -182,6 +182,8 @@ func (p *CloudKeeperProvider) Resources(ctx context.Context) []func() resource.R
 		NewGroupResource,
 		NewGroupMembershipResource,
 		NewIdentityProviderResource,
+		NewOrgPolicyResource,
+		NewOrgPolicyAttachmentResource,
 	}
 }
 
@@ -192,5 +194,8 @@ func (p *CloudKeeperProvider) DataSources(ctx context.Context) []func() datasour
 		NewPermissionSetDataSource,
 		NewUserDataSource,
 		NewGroupDataSource,
+		NewOrgPolicyDataSource,
+		NewOrgPoliciesDataSource,
+		NewOrgPoliciesForTargetDataSource,
 	}
 }

@@ -111,6 +111,16 @@ func (c *Client) doRequestRaw(method, path string, body interface{}) ([]byte, er
 	return respBody, nil
 }
 
+// doRequestCustomerRaw performs an HTTP request with customer path prefix but returns raw response (no unwrap).
+// Used for endpoints that return raw JSON instead of the standard {success, data} wrapper.
+func (c *Client) doRequestCustomerRaw(method, path string, body interface{}) ([]byte, error) {
+	if !strings.HasPrefix(c.BaseURL, "https://") {
+		c.BaseURL = "https://" + c.BaseURL
+	}
+	fullPath := fmt.Sprintf("/api/v1/customers/%s%s", c.PrismSubdomain, path)
+	return c.doRequestRaw(method, fullPath, body)
+}
+
 // doRequest performs an HTTP request with customer path prefix and unwraps the API response
 func (c *Client) doRequest(method, path string, body interface{}) ([]byte, error) {
 	// First request serialization - ensure first request completes before others proceed
@@ -961,6 +971,277 @@ func (c *Client) ListIdentityProviders() ([]IdentityProvider, error) {
 	}
 
 	return result, nil
+}
+
+// ========== Organization Policy Operations ==========
+
+// orgPolicyMu serializes all org policy API calls to prevent concurrent operations.
+var orgPolicyMu sync.Mutex
+
+type OrgPolicy struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Content     string `json:"content,omitempty"`
+	AWSManaged  bool   `json:"aws_managed,omitempty"`
+}
+
+type OrgPolicyTarget struct {
+	TargetID string `json:"target_id"`
+	Name     string `json:"name,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Arn      string `json:"arn,omitempty"`
+}
+
+func (c *Client) CreateOrgPolicy(managementAccountID string, policy *OrgPolicy) (*OrgPolicy, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"name":                  policy.Name,
+		"content":               policy.Content,
+	}
+	if policy.Description != "" {
+		requestBody["description"] = policy.Description
+	}
+	if policy.Type != "" {
+		requestBody["policy_type"] = policy.Type
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/create", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result OrgPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) GetOrgPolicy(managementAccountID, policyID string) (*OrgPolicy, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/describe", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result OrgPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) UpdateOrgPolicy(managementAccountID, policyID string, policy *OrgPolicy) (*OrgPolicy, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+	}
+	if policy.Name != "" {
+		requestBody["name"] = policy.Name
+	}
+	if policy.Description != "" {
+		requestBody["description"] = policy.Description
+	}
+	if policy.Content != "" {
+		requestBody["content"] = policy.Content
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/update", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result OrgPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) DeleteOrgPolicy(managementAccountID, policyID string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/policies/delete", requestBody)
+	return err
+}
+
+func (c *Client) ListOrgPolicies(managementAccountID, policyType string) ([]OrgPolicy, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+	}
+	if policyType != "" {
+		requestBody["policy_type"] = policyType
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []OrgPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return result, nil
+}
+
+func (c *Client) AttachOrgPolicy(managementAccountID, policyID, targetID string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+		"target_id":             targetID,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/policies/attach", requestBody)
+	return err
+}
+
+func (c *Client) DetachOrgPolicy(managementAccountID, policyID, targetID string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+		"target_id":             targetID,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/policies/detach", requestBody)
+	return err
+}
+
+func (c *Client) ListOrgPolicyTargets(managementAccountID, policyID string) ([]OrgPolicyTarget, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/targets", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []OrgPolicyTarget
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return result, nil
+}
+
+func (c *Client) ListOrgPoliciesForTarget(managementAccountID, targetID, policyType string) ([]OrgPolicy, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"target_id":             targetID,
+	}
+	if policyType != "" {
+		requestBody["policy_type"] = policyType
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/for-target", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []OrgPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return result, nil
+}
+
+// OrgPolicyTag represents a key-value tag on an org policy.
+type OrgPolicyTag struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func (c *Client) ListTagsForOrgPolicy(managementAccountID, policyID string) ([]OrgPolicyTag, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/policies/tags", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []OrgPolicyTag
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal tags response: %w", err)
+	}
+
+	return result, nil
+}
+
+func (c *Client) TagOrgPolicy(managementAccountID, policyID string, tags []OrgPolicyTag) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+		"tags":                  tags,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/policies/tag", requestBody)
+	return err
+}
+
+func (c *Client) UntagOrgPolicy(managementAccountID, policyID string, tagKeys []string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": managementAccountID,
+		"policy_id":             policyID,
+		"tag_keys":              tagKeys,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/policies/untag", requestBody)
+	return err
 }
 
 // ========== Dependency Waiting Utilities ==========

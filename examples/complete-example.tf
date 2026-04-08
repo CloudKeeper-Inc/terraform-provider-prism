@@ -258,6 +258,68 @@ resource "prism_identity_provider" "microsoft" {
   })
 }
 
+# ============= Organization Policies =============
+
+# Service Control Policy to restrict regions
+resource "prism_org_policy" "restrict_regions" {
+  management_account_id = "123456789012"
+  name                  = "RestrictToApprovedRegions"
+  description           = "Restrict operations to approved AWS regions"
+  policy_type           = "SERVICE_CONTROL_POLICY"
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Deny"
+      Action   = "*"
+      Resource = "*"
+      Condition = {
+        StringNotEquals = {
+          "aws:RequestedRegion" = ["us-east-1", "us-west-2", "eu-west-1"]
+        }
+      }
+    }]
+  })
+
+  tags = {
+    Environment = "production"
+    ManagedBy   = "terraform"
+  }
+}
+
+# Tag Policy to enforce standard tagging
+resource "prism_org_policy" "require_tags" {
+  management_account_id = "123456789012"
+  name                  = "RequireStandardTags"
+  description           = "Enforce standard tagging across the organization"
+  policy_type           = "TAG_POLICY"
+  content = jsonencode({
+    tags = {
+      Environment = {
+        tag_key = {
+          "@@assign" = "Environment"
+        }
+        tag_value = {
+          "@@assign" = ["production", "staging", "development"]
+        }
+      }
+    }
+  })
+}
+
+# Attach SCP to the production account
+resource "prism_org_policy_attachment" "restrict_regions_prod" {
+  management_account_id = "123456789012"
+  policy_id             = prism_org_policy.restrict_regions.id
+  target_id             = prism_aws_account.production.account_id
+}
+
+# Attach tag policy to an OU
+resource "prism_org_policy_attachment" "tags_to_ou" {
+  management_account_id = "123456789012"
+  policy_id             = prism_org_policy.require_tags.id
+  target_id             = "ou-abc1-exampleou"
+}
+
 # ============= Outputs =============
 
 output "aws_accounts" {
@@ -275,6 +337,14 @@ output "permission_sets" {
     admin     = prism_permission_set.admin.id
     developer = prism_permission_set.developer.id
     readonly  = prism_permission_set.readonly.id
+  }
+}
+
+output "org_policies" {
+  description = "Created organization policies"
+  value = {
+    restrict_regions = prism_org_policy.restrict_regions.id
+    require_tags     = prism_org_policy.require_tags.id
   }
 }
 

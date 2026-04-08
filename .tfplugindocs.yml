@@ -32,6 +32,13 @@ resources:
   - name: prism_identity_provider
     subcategory: "Identity Providers"
 
+  # Organization Policies
+  - name: prism_org_policy
+    subcategory: "Organization Policies"
+
+  - name: prism_org_policy_attachment
+    subcategory: "Organization Policies"
+
   # Customer (if exists)
   - name: prism_customer
     subcategory: "Organization"

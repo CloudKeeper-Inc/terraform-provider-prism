@@ -15,6 +15,7 @@ Use the provider to manage:
 - **Users & Groups**: Manage user identities and group memberships
 - **Permission Set Assignments**: Grant users and groups access to AWS accounts with specific permission sets
 - **Identity Providers**: Configure external identity providers (Google, Microsoft, Keycloak, custom OIDC)
+- **Organization Policies**: Create and attach Service Control Policies (SCPs), Tag Policies, Backup Policies, Resource Control Policies, and AI Services Opt-Out Policies across your AWS Organization
 
 ## Example Usage
 
@@ -105,6 +106,7 @@ provider "prism" {
 3. **Manage Users/Groups**: Create users and groups with `prism_user` and `prism_group`
 4. **Assign Permissions**: Grant access by creating `prism_permission_set_assignment` resources
 5. **Configure SSO**: Set up identity providers with `prism_identity_provider`
+6. **Manage Organization Policies**: Create and attach SCPs and other policy types with `prism_org_policy` and `prism_org_policy_attachment`
 
 For a complete example showing all resources working together, see [examples/complete-example.tf](https://github.com/CloudKeeper-Inc/terraform-provider-prism/blob/main/examples/complete-example.tf).
 

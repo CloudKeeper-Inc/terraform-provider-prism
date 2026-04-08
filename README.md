@@ -12,6 +12,7 @@ The CloudKeeper Prism Terraform provider allows you to manage:
 - **Groups**: User groups with hierarchies
 - **Group Memberships**: Manage group membership
 - **Identity Providers**: Google, Microsoft Azure AD, Keycloak, and custom OIDC providers
+- **Organization Policies**: Service Control Policies (SCPs), Resource Control Policies, Tag Policies, Backup Policies, and AI Services Opt-Out Policies
 
 ## Requirements
 
@@ -260,6 +261,34 @@ Manages an identity provider.
 **Read-Only:**
 - `alias` (String): Auto-generated based on type (e.g., "google" for Google)
 
+### prism_org_policy
+
+Manages an AWS Organizations policy through CloudKeeper Prism.
+
+**Arguments:**
+- `management_account_id` (Required, String): The AWS management (payer) account ID. Changing this forces a new resource.
+- `name` (Required, String): The friendly name of the policy
+- `content` (Required, String): The policy content as a JSON string
+- `description` (Optional, String): A description of the policy
+- `policy_type` (Optional, String): Policy type (default: `SERVICE_CONTROL_POLICY`). Valid values: `SERVICE_CONTROL_POLICY`, `TAG_POLICY`, `BACKUP_POLICY`, `AISERVICES_OPT_OUT_POLICY`, `RESOURCE_CONTROL_POLICY`. Changing this forces a new resource.
+- `tags` (Optional, Map of String): Key-value tags to attach to the policy
+
+**Read-Only:**
+- `id` (String): The unique identifier of the policy
+- `aws_managed` (Bool): Whether the policy is AWS-managed
+
+### prism_org_policy_attachment
+
+Attaches an AWS Organizations policy to a target (root, OU, or account).
+
+**Arguments:**
+- `management_account_id` (Required, String): The AWS management (payer) account ID. Changing this forces a new resource.
+- `policy_id` (Required, String): The policy ID to attach. Changing this forces a new resource.
+- `target_id` (Required, String): The target ID (root, OU, or account). Changing this forces a new resource.
+
+**Read-Only:**
+- `id` (String): The attachment identifier (format: policy_id/target_id)
+
 ## Documentation
 
 Complete documentation is available on the [Terraform Registry](https://registry.terraform.io/providers/CloudKeeper-Inc/prism/latest/docs).
@@ -292,6 +321,9 @@ All resources have corresponding data sources for reading existing configuration
 - `data.prism_permission_set`
 - `data.prism_user`
 - `data.prism_group`
+- `data.prism_org_policy`
+- `data.prism_org_policies`
+- `data.prism_org_policies_for_target`
 
 ## Importing Existing Infrastructure
 

@@ -22,12 +22,17 @@ terraform-provider-prism/
 │   │   ├── user.md
 │   │   ├── group.md
 │   │   ├── group_membership.md
-│   │   └── identity_provider.md
+│   │   ├── identity_provider.md
+│   │   ├── org_policy.md
+│   │   └── org_policy_attachment.md
 │   └── data-sources/              # Data source documentation
 │       ├── aws_account.md
 │       ├── permission_set.md
 │       ├── user.md
-│       └── group.md
+│       ├── group.md
+│       ├── org_policy.md
+│       ├── org_policies.md
+│       └── org_policies_for_target.md
 │
 ├── templates/                     # Custom templates for documentation
 │   └── index.md.tmpl              # Provider overview template
@@ -42,7 +47,20 @@ terraform-provider-prism/
 │       ├── prism_permission_set/
 │       │   ├── resource.tf
 │       │   └── import.sh
+│       ├── prism_org_policy/
+│       │   ├── resource.tf
+│       │   └── import.sh
+│       ├── prism_org_policy_attachment/
+│       │   ├── resource.tf
+│       │   └── import.sh
 │       └── ...
+│   └── data-sources/
+│       ├── prism_org_policy/
+│       │   └── data-source.tf
+│       ├── prism_org_policies/
+│       │   └── data-source.tf
+│       └── prism_org_policies_for_target/
+│           └── data-source.tf
 │
 └── .tfplugindocs.yml              # Documentation generator configuration
 ```
