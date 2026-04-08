@@ -22,7 +22,6 @@ type OrgPoliciesForTargetDataSource struct {
 }
 
 type OrgPoliciesForTargetDataSourceModel struct {
-	ManagementAccountID types.String            `tfsdk:"management_account_id"`
 	TargetID            types.String            `tfsdk:"target_id"`
 	PolicyType          types.String            `tfsdk:"policy_type"`
 	Policies            []OrgPolicySummaryModel `tfsdk:"policies"`
@@ -37,10 +36,6 @@ func (d *OrgPoliciesForTargetDataSource) Schema(ctx context.Context, req datasou
 		MarkdownDescription: "Lists AWS Organizations policies attached to a specific target (root, OU, or account) through CloudKeeper Prism.",
 
 		Attributes: map[string]schema.Attribute{
-			"management_account_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The AWS management (payer) account ID that owns the organization",
-			},
 			"target_id": schema.StringAttribute{
 				Required:            true,
 				MarkdownDescription: "The ID of the root, organizational unit, or account to list policies for",
@@ -118,7 +113,7 @@ func (d *OrgPoliciesForTargetDataSource) Read(ctx context.Context, req datasourc
 	policyType := data.PolicyType.ValueString()
 
 	policies, err := d.client.ListOrgPoliciesForTarget(
-		data.ManagementAccountID.ValueString(),
+		"",
 		data.TargetID.ValueString(),
 		policyType,
 	)

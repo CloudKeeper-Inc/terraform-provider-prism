@@ -21,7 +21,6 @@ type OrgPolicyDataSource struct {
 
 type OrgPolicyDataSourceModel struct {
 	ID                  types.String `tfsdk:"id"`
-	ManagementAccountID types.String `tfsdk:"management_account_id"`
 	Name                types.String `tfsdk:"name"`
 	Description         types.String `tfsdk:"description"`
 	Content             types.String `tfsdk:"content"`
@@ -42,10 +41,6 @@ func (d *OrgPolicyDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			"id": schema.StringAttribute{
 				Required:            true,
 				MarkdownDescription: "The unique identifier of the policy",
-			},
-			"management_account_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The AWS management (payer) account ID that owns the organization",
 			},
 			"name": schema.StringAttribute{
 				Computed:            true,
@@ -101,7 +96,7 @@ func (d *OrgPolicyDataSource) Read(ctx context.Context, req datasource.ReadReque
 		return
 	}
 
-	detail, err := d.client.GetOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString())
+	detail, err := d.client.GetOrgPolicy("", data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read org policy, got error: %s", err))
 		return
@@ -113,7 +108,7 @@ func (d *OrgPolicyDataSource) Read(ctx context.Context, req datasource.ReadReque
 	data.PolicyType = types.StringValue(detail.Type)
 	data.AWSManaged = types.BoolValue(detail.AWSManaged)
 
-	tags, err := d.client.ListTagsForOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString())
+	tags, err := d.client.ListTagsForOrgPolicy("", data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read tags for org policy, got error: %s", err))
 		return

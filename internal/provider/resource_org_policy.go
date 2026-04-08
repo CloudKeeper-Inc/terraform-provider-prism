@@ -29,9 +29,8 @@ type OrgPolicyResource struct {
 }
 
 type OrgPolicyResourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	ManagementAccountID types.String `tfsdk:"management_account_id"`
-	Name                types.String `tfsdk:"name"`
+	ID         types.String `tfsdk:"id"`
+	Name       types.String `tfsdk:"name"`
 	Description         types.String `tfsdk:"description"`
 	Content             types.String `tfsdk:"content"`
 	PolicyType          types.String `tfsdk:"policy_type"`
@@ -67,13 +66,6 @@ func (r *OrgPolicyResource) Schema(ctx context.Context, req resource.SchemaReque
 				MarkdownDescription: "The unique identifier of the policy",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"management_account_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The AWS management (payer) account ID that owns the organization",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -151,14 +143,14 @@ func (r *OrgPolicyResource) Create(ctx context.Context, req resource.CreateReque
 		Type:        data.PolicyType.ValueString(),
 	}
 
-	created, err := r.client.CreateOrgPolicy(data.ManagementAccountID.ValueString(), policy)
+	created, err := r.client.CreateOrgPolicy("", policy)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create org policy, got error: %s", err))
 		return
 	}
 
 	// Create response doesn't include content, fetch full details
-	detail, err := r.client.GetOrgPolicy(data.ManagementAccountID.ValueString(), created.ID)
+	detail, err := r.client.GetOrgPolicy("", created.ID)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read org policy after creation, got error: %s", err))
 		return
@@ -183,7 +175,7 @@ func (r *OrgPolicyResource) Create(ctx context.Context, req resource.CreateReque
 			for k, v := range tags {
 				tagList = append(tagList, OrgPolicyTag{Key: k, Value: v})
 			}
-			if err := r.client.TagOrgPolicy(data.ManagementAccountID.ValueString(), detail.ID, tagList); err != nil {
+			if err := r.client.TagOrgPolicy("", detail.ID, tagList); err != nil {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to tag org policy, got error: %s", err))
 				return
 			}
@@ -201,7 +193,7 @@ func (r *OrgPolicyResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 
-	detail, err := r.client.GetOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString())
+	detail, err := r.client.GetOrgPolicy("", data.ID.ValueString())
 	if err != nil {
 		if strings.Contains(err.Error(), "404") || strings.Contains(strings.ToLower(err.Error()), "not found") {
 			resp.State.RemoveResource(ctx)
@@ -218,7 +210,7 @@ func (r *OrgPolicyResource) Read(ctx context.Context, req resource.ReadRequest, 
 	data.AWSManaged = types.BoolValue(detail.AWSManaged)
 
 	// Fetch tags
-	tags, err := r.client.ListTagsForOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString())
+	tags, err := r.client.ListTagsForOrgPolicy("", data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read tags for org policy, got error: %s", err))
 		return
@@ -252,7 +244,7 @@ func (r *OrgPolicyResource) Update(ctx context.Context, req resource.UpdateReque
 		Content:     data.Content.ValueString(),
 	}
 
-	updated, err := r.client.UpdateOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString(), policy)
+	updated, err := r.client.UpdateOrgPolicy("", data.ID.ValueString(), policy)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update org policy, got error: %s", err))
 		return
@@ -287,7 +279,7 @@ func (r *OrgPolicyResource) Update(ctx context.Context, req resource.UpdateReque
 		}
 	}
 
-	mgmtID := data.ManagementAccountID.ValueString()
+	mgmtID := ""
 	policyID := data.ID.ValueString()
 
 	// Remove deleted tags
@@ -329,7 +321,7 @@ func (r *OrgPolicyResource) Delete(ctx context.Context, req resource.DeleteReque
 		return
 	}
 
-	err := r.client.DeleteOrgPolicy(data.ManagementAccountID.ValueString(), data.ID.ValueString())
+	err := r.client.DeleteOrgPolicy("", data.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete org policy, got error: %s", err))
 		return
@@ -337,15 +329,5 @@ func (r *OrgPolicyResource) Delete(ctx context.Context, req resource.DeleteReque
 }
 
 func (r *OrgPolicyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	parts := strings.Split(req.ID, "/")
-	if len(parts) != 2 {
-		resp.Diagnostics.AddError(
-			"Invalid Import ID",
-			"Expected import ID format: management_account_id/policy_id",
-		)
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("management_account_id"), parts[0])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }

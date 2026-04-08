@@ -1188,6 +1188,125 @@ func (c *Client) ListOrgPoliciesForTarget(managementAccountID, targetID, policyT
 	return result, nil
 }
 
+// ========== Organization Structure Operations ==========
+
+// OrgNode represents a node in the org tree (ROOT, OU, or ACCOUNT).
+type OrgNode struct {
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Type     string     `json:"type"`
+	Email    string     `json:"email,omitempty"`
+	Status   string     `json:"status,omitempty"`
+	Children []*OrgNode `json:"children,omitempty"`
+}
+
+// OrgStructure is the full organization tree response.
+type OrgStructure struct {
+	OrgID             string     `json:"org_id"`
+	ManagementAccount string    `json:"management_account"`
+	Tree              []*OrgNode `json:"tree"`
+}
+
+func (c *Client) GetOrgStructure() (*OrgStructure, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": "",
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/structure", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result OrgStructure
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal org structure: %w", err)
+	}
+
+	return &result, nil
+}
+
+// findNodeInTree recursively searches for a node by ID in the org tree.
+func findNodeInTree(nodes []*OrgNode, id string) *OrgNode {
+	for _, n := range nodes {
+		if n.ID == id {
+			return n
+		}
+		if found := findNodeInTree(n.Children, id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// findParentInTree finds the parent node of a given child ID.
+func findParentInTree(nodes []*OrgNode, childID string) *OrgNode {
+	for _, n := range nodes {
+		for _, c := range n.Children {
+			if c.ID == childID {
+				return n
+			}
+		}
+		if found := findParentInTree(n.Children, childID); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func (c *Client) CreateOU(parentID, name string) (*OrgNode, error) {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": "",
+		"parent_id":             parentID,
+		"name":                  name,
+	}
+
+	body, err := c.doRequestCustomerRaw("POST", "/org/create-ou", requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	var result OrgNode
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal created OU: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (c *Client) DeleteOU(ouID string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": "",
+		"ou_id":                 ouID,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/delete-ou", requestBody)
+	return err
+}
+
+func (c *Client) MoveAccount(accountID, sourceParentID, destParentID string) error {
+	orgPolicyMu.Lock()
+	defer orgPolicyMu.Unlock()
+
+	requestBody := map[string]interface{}{
+		"management_account_id": "",
+		"account_id":            accountID,
+		"source_parent_id":      sourceParentID,
+		"dest_parent_id":        destParentID,
+	}
+
+	_, err := c.doRequestCustomerRaw("POST", "/org/move-account", requestBody)
+	return err
+}
+
 // OrgPolicyTag represents a key-value tag on an org policy.
 type OrgPolicyTag struct {
 	Key   string `json:"key"`

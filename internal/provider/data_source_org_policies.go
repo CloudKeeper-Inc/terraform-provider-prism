@@ -22,7 +22,6 @@ type OrgPoliciesDataSource struct {
 }
 
 type OrgPoliciesDataSourceModel struct {
-	ManagementAccountID types.String              `tfsdk:"management_account_id"`
 	PolicyType          types.String              `tfsdk:"policy_type"`
 	Policies            []OrgPolicySummaryModel   `tfsdk:"policies"`
 }
@@ -44,10 +43,6 @@ func (d *OrgPoliciesDataSource) Schema(ctx context.Context, req datasource.Schem
 		MarkdownDescription: "Lists AWS Organizations policies for a management account through CloudKeeper Prism.",
 
 		Attributes: map[string]schema.Attribute{
-			"management_account_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The AWS management (payer) account ID that owns the organization",
-			},
 			"policy_type": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "The type of policy to filter by. Defaults to SERVICE_CONTROL_POLICY if not specified",
@@ -120,7 +115,7 @@ func (d *OrgPoliciesDataSource) Read(ctx context.Context, req datasource.ReadReq
 
 	policyType := data.PolicyType.ValueString()
 
-	policies, err := d.client.ListOrgPolicies(data.ManagementAccountID.ValueString(), policyType)
+	policies, err := d.client.ListOrgPolicies("", policyType)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to list org policies, got error: %s", err))
 		return
