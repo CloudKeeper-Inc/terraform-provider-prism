@@ -48,14 +48,14 @@ func (r *OrgPolicyAttachmentResource) Schema(ctx context.Context, req resource.S
 			},
 			"policy_id": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The unique identifier of the policy to attach",
+				MarkdownDescription: "The unique identifier of the policy to attach. Changing this forces a new resource to be created.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"target_id": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The ID of the root, organizational unit, or account to attach the policy to",
+				MarkdownDescription: "The ID of the root, organizational unit, or account to attach the policy to. Changing this forces a new resource to be created.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},

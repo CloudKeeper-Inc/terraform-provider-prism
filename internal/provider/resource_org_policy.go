@@ -29,13 +29,13 @@ type OrgPolicyResource struct {
 }
 
 type OrgPolicyResourceModel struct {
-	ID         types.String `tfsdk:"id"`
-	Name       types.String `tfsdk:"name"`
-	Description         types.String `tfsdk:"description"`
-	Content             types.String `tfsdk:"content"`
-	PolicyType          types.String `tfsdk:"policy_type"`
-	AWSManaged          types.Bool   `tfsdk:"aws_managed"`
-	Tags                types.Map    `tfsdk:"tags"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Content     types.String `tfsdk:"content"`
+	PolicyType  types.String `tfsdk:"policy_type"`
+	AWSManaged  types.Bool   `tfsdk:"aws_managed"`
+	Tags        types.Map    `tfsdk:"tags"`
 }
 
 // normalizeJSON re-marshals a JSON string through map[string]interface{} so that
@@ -84,7 +84,7 @@ func (r *OrgPolicyResource) Schema(ctx context.Context, req resource.SchemaReque
 				Optional:            true,
 				Computed:            true,
 				Default:             stringdefault.StaticString("SERVICE_CONTROL_POLICY"),
-				MarkdownDescription: "The type of policy. Valid values: `SERVICE_CONTROL_POLICY`, `TAG_POLICY`, `BACKUP_POLICY`, `AISERVICES_OPT_OUT_POLICY`, `RESOURCE_CONTROL_POLICY`",
+				MarkdownDescription: "The type of policy. Valid values: `SERVICE_CONTROL_POLICY`, `TAG_POLICY`, `BACKUP_POLICY`, `AISERVICES_OPT_OUT_POLICY`, `RESOURCE_CONTROL_POLICY`. Defaults to `SERVICE_CONTROL_POLICY`. Changing this forces a new resource to be created.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						"SERVICE_CONTROL_POLICY",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -63,8 +64,10 @@ func (r *IdentityProviderResource) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"alias": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The alias/identifier for the identity provider. This is automatically set by the backend based on the type (e.g., 'google' for Google, 'microsoft' for Microsoft).",
+				Computed: true,
+				MarkdownDescription: "The alias that identifies this identity provider in Prism. Assigned when the " +
+					"provider is created and stable for as long as the resource exists. It forms part of the import " +
+					"ID and of the provider's redirect URI; retrieve it from the Prism admin console or `terraform show`.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
@@ -80,9 +83,12 @@ func (r *IdentityProviderResource) Schema(ctx context.Context, req resource.Sche
 				MarkdownDescription: "Whether the identity provider is enabled",
 			},
 			"config": schema.StringAttribute{
-				Required:            true,
-				Sensitive:           true,
-				MarkdownDescription: "JSON configuration for the identity provider (includes client ID, client secret, etc.)",
+				Required:  true,
+				Sensitive: true,
+				MarkdownDescription: "JSON-encoded configuration for the identity provider, normally written with " +
+					"`jsonencode()`. The accepted keys depend on `type` - see the configuration reference below. Keys " +
+					"that are not recognised for the given type are ignored, so a misspelled key produces a provider " +
+					"that applies cleanly but does not work.",
 			},
 		},
 	}
@@ -134,11 +140,14 @@ func (r *IdentityProviderResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	data.ID = types.StringValue(created.ID)
-
-	// Always use the alias returned by the API - it's auto-generated based on type
-	// Backend hardcodes: google -> "google", microsoft -> "microsoft", etc.
+	// Always use the alias returned by the API. It is generated from the display
+	// name (GenerateURLSafeAlias) plus a uniqueness suffix, so it cannot be
+	// predicted from the type alone.
 	data.Alias = types.StringValue(created.Alias)
+
+	// The API exposes no separate identifier for an IdP, so the alias doubles as
+	// the resource ID. It is the key every other endpoint is addressed by.
+	data.ID = types.StringValue(created.Alias)
 
 	if created.DisplayName != "" {
 		data.DisplayName = types.StringValue(created.DisplayName)
@@ -166,28 +175,45 @@ func (r *IdentityProviderResource) Read(ctx context.Context, req resource.ReadRe
 
 	idp, err := r.client.GetIdentityProvider(data.Type.ValueString(), data.Alias.ValueString())
 	if err != nil {
+		// Removed outside Terraform - drop it from state so it can be recreated
+		// instead of wedging every subsequent plan behind a hard error.
+		if isDependencyNotFoundError(err) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read identity provider, got error: %s", err))
 		return
 	}
+
+	if idp.Alias != "" {
+		data.Alias = types.StringValue(idp.Alias)
+	}
+	// The alias doubles as the resource ID (see Create).
+	data.ID = data.Alias
 
 	if idp.DisplayName != "" {
 		data.DisplayName = types.StringValue(idp.DisplayName)
 	}
 
-	// Preserve enabled from state - API may not properly return this field
-	// Keep the existing state value in data.Enabled
+	// Adopt enabled only when state has no value, i.e. straight after an import.
+	// The backend hardcodes enabled=true for some IdP types, so taking the API
+	// value unconditionally would fight a configured `enabled = false`.
+	if data.Enabled.IsNull() {
+		data.Enabled = types.BoolValue(idp.Enabled)
+	}
 
 	// API doesn't return sensitive config fields (clientId, clientSecret, etc.)
-	// Keep the existing state config value to avoid drift on sensitive fields
-	// data.Config already contains the state value from earlier in this function
+	// Keep the existing state config value to avoid drift on sensitive fields.
+	// After an import it is null, so the first plan shows a diff for config.
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
 func (r *IdentityProviderResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var data IdentityProviderResourceModel
+	var data, state IdentityProviderResourceModel
 
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &data)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -198,29 +224,34 @@ func (r *IdentityProviderResource) Update(ctx context.Context, req resource.Upda
 		return
 	}
 
+	// The alias is backend-generated and never changes on update, so read it from
+	// prior state rather than the plan.
+	alias := state.Alias.ValueString()
+
+	// display_name is Optional, but the backend PUT replaces the whole IdP and an
+	// empty displayName clears it in Keycloak. Fall back to the value already in
+	// state when the configuration omits it.
+	displayName := data.DisplayName.ValueString()
+	if displayName == "" {
+		displayName = state.DisplayName.ValueString()
+	}
+
 	idp := &IdentityProvider{
-		Alias:       data.Alias.ValueString(),
-		DisplayName: data.DisplayName.ValueString(),
+		Alias:       alias,
+		DisplayName: displayName,
 		Enabled:     data.Enabled.ValueBool(),
 		Config:      config,
 	}
 
-	updated, err := r.client.UpdateIdentityProvider(data.Type.ValueString(), data.Alias.ValueString(), idp)
-	if err != nil {
+	if _, err := r.client.UpdateIdentityProvider(data.Type.ValueString(), alias, idp); err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to update identity provider, got error: %s", err))
 		return
 	}
 
-	if updated.DisplayName != "" {
-		data.DisplayName = types.StringValue(updated.DisplayName)
-	}
-
-	// Preserve enabled from plan - API may not properly return this field during update
-	// Keep the planned value already in data.Enabled
-
-	// API doesn't return sensitive config fields (clientId, clientSecret, etc.)
-	// Keep the planned config value to avoid drift on sensitive fields
-	// data.Config already contains the planned value from earlier in this function
+	// display_name, enabled and config keep their planned values. The API does not
+	// echo back sensitive config fields, and overwriting an Optional attribute with
+	// a server value that differs from the plan is rejected by Terraform as an
+	// inconsistent result.
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
@@ -235,11 +266,29 @@ func (r *IdentityProviderResource) Delete(ctx context.Context, req resource.Dele
 
 	err := r.client.DeleteIdentityProvider(data.Type.ValueString(), data.Alias.ValueString())
 	if err != nil {
+		// Already gone (e.g. removed in the Prism UI) - treat as success so destroy
+		// can complete instead of leaving the resource stranded in state.
+		if isDependencyNotFoundError(err) {
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete identity provider, got error: %s", err))
 		return
 	}
 }
 
 func (r *IdentityProviderResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	// Read() needs both the type and the alias to build the request path, and
+	// neither can be derived from the other, so the import ID carries both.
+	typeName, alias, found := strings.Cut(req.ID, ":")
+	if !found || typeName == "" || alias == "" {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			fmt.Sprintf("Expected import ID in the format \"<type>:<alias>\" (for example \"custom:okta\"), got: %q", req.ID),
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("type"), typeName)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("alias"), alias)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), alias)...)
 }

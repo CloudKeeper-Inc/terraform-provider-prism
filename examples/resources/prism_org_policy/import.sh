@@ -1,2 +1,3 @@
-# Org policies can be imported using management_account_id/policy_id
-terraform import prism_org_policy.example "123456789012/p-examplepolicyid"
+# Org policies are imported by their policy ID.
+# The management account is resolved automatically, so it is not part of the ID.
+terraform import prism_org_policy.example "p-examplepolicyid"

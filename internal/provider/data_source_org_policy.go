@@ -20,13 +20,13 @@ type OrgPolicyDataSource struct {
 }
 
 type OrgPolicyDataSourceModel struct {
-	ID                  types.String `tfsdk:"id"`
-	Name                types.String `tfsdk:"name"`
-	Description         types.String `tfsdk:"description"`
-	Content             types.String `tfsdk:"content"`
-	PolicyType          types.String `tfsdk:"policy_type"`
-	AWSManaged          types.Bool   `tfsdk:"aws_managed"`
-	Tags                types.Map    `tfsdk:"tags"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Content     types.String `tfsdk:"content"`
+	PolicyType  types.String `tfsdk:"policy_type"`
+	AWSManaged  types.Bool   `tfsdk:"aws_managed"`
+	Tags        types.Map    `tfsdk:"tags"`
 }
 
 func (d *OrgPolicyDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {

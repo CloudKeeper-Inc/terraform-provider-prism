@@ -41,3 +41,4 @@ output "policy_content" {
 - `description` (String) A description of the policy
 - `name` (String) The friendly name of the policy
 - `policy_type` (String) The type of policy
+- `tags` (Map of String) Key-value tags on the policy

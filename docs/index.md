@@ -84,7 +84,7 @@ Alternatively, you can specify credentials directly in the provider configuratio
 provider "prism" {
   prism_subdomain = "your-subdomain"
   api_token       = "your-api-token"
-  prism_base_url = "https://prism.cloudkeeper.com"
+  base_url        = "https://prism.cloudkeeper.com"
 }
 ```
 

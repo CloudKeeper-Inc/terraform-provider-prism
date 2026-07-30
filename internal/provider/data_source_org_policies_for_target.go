@@ -22,9 +22,9 @@ type OrgPoliciesForTargetDataSource struct {
 }
 
 type OrgPoliciesForTargetDataSourceModel struct {
-	TargetID            types.String            `tfsdk:"target_id"`
-	PolicyType          types.String            `tfsdk:"policy_type"`
-	Policies            []OrgPolicySummaryModel `tfsdk:"policies"`
+	TargetID   types.String            `tfsdk:"target_id"`
+	PolicyType types.String            `tfsdk:"policy_type"`
+	Policies   []OrgPolicySummaryModel `tfsdk:"policies"`
 }
 
 func (d *OrgPoliciesForTargetDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -42,7 +42,7 @@ func (d *OrgPoliciesForTargetDataSource) Schema(ctx context.Context, req datasou
 			},
 			"policy_type": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The type of policy to filter by. Defaults to SERVICE_CONTROL_POLICY if not specified",
+				MarkdownDescription: "The type of policy to filter by. Defaults to SERVICE_CONTROL_POLICY if not specified. Valid values: `SERVICE_CONTROL_POLICY`, `TAG_POLICY`, `BACKUP_POLICY`, `AISERVICES_OPT_OUT_POLICY`, `RESOURCE_CONTROL_POLICY`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						"SERVICE_CONTROL_POLICY",

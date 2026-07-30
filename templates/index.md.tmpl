@@ -32,6 +32,7 @@ You can provide credentials via environment variables:
 ```shell
 export PRISM_SUBDOMAIN="your-subdomain"
 export PRISM_API_TOKEN="your-api-token"
+export PRISM_BASE_URL="https://prism.cloudkeeper.com"
 ```
 
 ### Configuration
@@ -42,6 +43,7 @@ Alternatively, you can specify credentials directly in the provider configuratio
 provider "prism" {
   prism_subdomain = "your-subdomain"
   api_token       = "your-api-token"
+  base_url        = "https://prism.cloudkeeper.com"
 }
 ```
 

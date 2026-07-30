@@ -22,8 +22,8 @@ type OrgPoliciesDataSource struct {
 }
 
 type OrgPoliciesDataSourceModel struct {
-	PolicyType          types.String              `tfsdk:"policy_type"`
-	Policies            []OrgPolicySummaryModel   `tfsdk:"policies"`
+	PolicyType types.String            `tfsdk:"policy_type"`
+	Policies   []OrgPolicySummaryModel `tfsdk:"policies"`
 }
 
 type OrgPolicySummaryModel struct {
@@ -45,7 +45,7 @@ func (d *OrgPoliciesDataSource) Schema(ctx context.Context, req datasource.Schem
 		Attributes: map[string]schema.Attribute{
 			"policy_type": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The type of policy to filter by. Defaults to SERVICE_CONTROL_POLICY if not specified",
+				MarkdownDescription: "The type of policy to filter by. Defaults to SERVICE_CONTROL_POLICY if not specified. Valid values: `SERVICE_CONTROL_POLICY`, `TAG_POLICY`, `BACKUP_POLICY`, `AISERVICES_OPT_OUT_POLICY`, `RESOURCE_CONTROL_POLICY`.",
 				Validators: []validator.String{
 					stringvalidator.OneOf(
 						"SERVICE_CONTROL_POLICY",

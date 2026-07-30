@@ -788,8 +788,10 @@ func (c *Client) CreateIdentityProvider(idpType string, idp *IdentityProvider) (
 }
 
 func (c *Client) GetIdentityProvider(idpType, alias string) (*IdentityProvider, error) {
-	// Backend endpoint is just /identity-providers/{type}, not with alias
-	body, err := c.doRequest("GET", fmt.Sprintf("/identity-providers/%s", idpType), nil)
+	// A single IdP is addressed by alias. The collection path is the *list*
+	// endpoint and returns {"identityProviders": [...]}, which does not match the
+	// response struct below and would silently decode to zero values.
+	body, err := c.doRequest("GET", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -832,10 +834,13 @@ func (c *Client) UpdateIdentityProvider(idpType, alias string, idp *IdentityProv
 	// Build request body based on IdP type - backend expects fields at top level, not nested in config
 	requestBody := make(map[string]interface{})
 
-	// Common fields
-	if idp.DisplayName != "" {
-		requestBody["displayName"] = idp.DisplayName
+	// The backend PUT replaces the entire IdP definition, so omitting displayName
+	// decodes to "" server-side and blanks it in Keycloak rather than leaving it
+	// untouched. Refuse the call instead of silently clearing it.
+	if idp.DisplayName == "" {
+		return nil, fmt.Errorf("displayName is required to update an identity provider: an empty value would clear the existing display name")
 	}
+	requestBody["displayName"] = idp.DisplayName
 	requestBody["enabled"] = idp.Enabled
 
 	// Extract config fields and add to top level based on type
@@ -913,8 +918,8 @@ func (c *Client) UpdateIdentityProvider(idpType, alias string, idp *IdentityProv
 		}
 	}
 
-	// Backend endpoint is just /identity-providers/{type}, not with alias
-	body, err := c.doRequest("PUT", fmt.Sprintf("/identity-providers/%s", idpType), requestBody)
+	// Updates are addressed by alias; the collection path has no PUT handler.
+	body, err := c.doRequest("PUT", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -954,8 +959,8 @@ func (c *Client) UpdateIdentityProvider(idpType, alias string, idp *IdentityProv
 }
 
 func (c *Client) DeleteIdentityProvider(idpType, alias string) error {
-	// Backend endpoint is just /identity-providers/{type}, not with alias
-	_, err := c.doRequest("DELETE", fmt.Sprintf("/identity-providers/%s", idpType), nil)
+	// Deletes are addressed by alias; the collection path has no DELETE handler.
+	_, err := c.doRequest("DELETE", fmt.Sprintf("/identity-providers/%s/%s", idpType, alias), nil)
 	return err
 }
 
@@ -1203,7 +1208,7 @@ type OrgNode struct {
 // OrgStructure is the full organization tree response.
 type OrgStructure struct {
 	OrgID             string     `json:"org_id"`
-	ManagementAccount string    `json:"management_account"`
+	ManagementAccount string     `json:"management_account"`
 	Tree              []*OrgNode `json:"tree"`
 }
 

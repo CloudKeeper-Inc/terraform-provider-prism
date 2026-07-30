@@ -43,7 +43,7 @@ output "ou_scp_count" {
 
 ### Read-Only
 
-- `policies` (List of Object) List of policies attached to the target (see [below for nested schema](#nestedatt--policies))
+- `policies` (Attributes List) List of policies attached to the target (see [below for nested schema](#nestedatt--policies))
 
 <a id="nestedatt--policies"></a>
 ### Nested Schema for `policies`

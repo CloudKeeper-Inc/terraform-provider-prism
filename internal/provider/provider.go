@@ -59,7 +59,7 @@ func (p *CloudKeeperProvider) Schema(ctx context.Context, req provider.SchemaReq
 				Sensitive:           true,
 			},
 			"base_url": schema.StringAttribute{
-				MarkdownDescription: "The base URL for the Prism API endpoint (e.g., `https://prism.cloudkeeper.com`). The port 8090 is automatically appended. Can also be set via the `PRISM_BASE_URL` environment variable.",
+				MarkdownDescription: "The base URL for the Prism API endpoint (e.g., `https://prism.cloudkeeper.com` or `https://myprism.xyz.in`). The port 8090 is automatically appended. Can also be set via the `PRISM_BASE_URL` environment variable.",
 				Optional:            true,
 			},
 		},

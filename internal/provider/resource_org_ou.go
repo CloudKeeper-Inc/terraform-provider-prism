@@ -43,29 +43,33 @@ func (r *OrgOUResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:            true,
-				MarkdownDescription: "The unique identifier of the OU (e.g., `ou-xxxx-xxxxxxxx`)",
+				MarkdownDescription: "The unique identifier of the OU (e.g., `ou-xxxx-xxxxxxxx`).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
 				Required:            true,
-				MarkdownDescription: "The name of the organizational unit",
+				MarkdownDescription: "The name of the organizational unit. Changing this forces a new resource to be created.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"parent_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The ID of the parent node (root ID like `r-xxxx` or another OU ID)",
+				Required: true,
+				MarkdownDescription: "The ID of the parent node. Use the root ID (e.g., `r-xxxx`) or another OU ID " +
+					"(e.g., `ou-xxxx-xxxxxxxx`). You can find these IDs in the **Accounts > Hierarchy** view in Prism. " +
+					"Changing this forces a new resource to be created.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"accounts": schema.SetAttribute{
-				Optional:            true,
-				ElementType:         types.StringType,
-				MarkdownDescription: "Set of AWS account IDs to place in this OU. Accounts are moved in on create/update and moved back to the parent on removal/destroy.",
+				Optional:    true,
+				ElementType: types.StringType,
+				MarkdownDescription: "AWS account IDs to place in this OU. When accounts are added, they are moved " +
+					"into the OU. When removed, they are moved back to the parent. On destroy, all accounts are moved " +
+					"back to the parent before the OU is deleted.",
 			},
 		},
 	}

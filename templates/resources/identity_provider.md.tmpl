@@ -1,0 +1,93 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.RenderedProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+{{ if .HasExample -}}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+## Configuration Reference
+
+`config` is a JSON string, normally produced with `jsonencode()`. The keys it
+accepts depend on `type`. Keys that are not listed for the type you are using are
+ignored: a misspelled key such as `tokenURL` instead of `tokenUrl` produces a
+provider that applies cleanly but does not work, with no error and no diff.
+
+Note that `display_name` is a top-level attribute, not a `config` key.
+
+### `type = "custom"` (OIDC)
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `clientId` | String | Yes | Client ID of the application registered with your identity provider. |
+| `clientSecret` | String | Yes | Client secret for that application. |
+| `issuer` | String | Yes | OIDC issuer URL, for example `https://your-org.okta.com/oauth2/default`. |
+| `authorizationUrl` | String | Yes | Authorization endpoint. Users are redirected here to authenticate. |
+| `tokenUrl` | String | Yes | Token endpoint, used to exchange authorization codes for tokens. |
+| `userInfoUrl` | String | Yes | UserInfo endpoint, used to retrieve the user profile. |
+| `logoutUrl` | String | No | Logout endpoint. When set, users are redirected here on sign-out to end the session with the identity provider. |
+
+URL-valued keys use a lowercase `Url` suffix, not `URL`.
+
+### `type = "google"`
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `clientId` | String | Yes | OAuth client ID from the Google Cloud console. |
+| `clientSecret` | String | Yes | OAuth client secret. |
+| `hostedDomain` | String | No | Restrict sign-in to a single Google Workspace domain. |
+
+### `type = "microsoft"`
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `clientId` | String | Yes | Application (client) ID from the Azure app registration. |
+| `clientSecret` | String | Yes | Client secret for that registration. |
+| `tenantId` | String | Yes | Directory (tenant) ID. |
+
+## Aliases and Redirect URIs
+
+`alias` is read-only. Prism assigns it when the provider is created, and it stays
+the same for as long as the resource exists. You need it to import an existing
+provider, and it determines the redirect URI that your identity provider must
+allow. Read it from the Identity Providers page in the Prism admin console, or
+from `terraform show`.
+
+Changing `display_name` on an existing resource does not change the alias, so the
+redirect URI is unaffected. Replacing the resource does produce a new alias, and
+therefore a new redirect URI, which you must then add to the application
+registration on your identity provider's side. Anything that forces replacement -
+including changing `type`, or destroying and recreating the resource - has this
+effect.
+
+## Drift Detection
+
+`config` is not refreshed from the API, because the client secret cannot be read
+back. Terraform therefore reports no drift for any value inside `config`,
+including the endpoint URLs, even if it was changed outside Terraform. Terraform
+remains authoritative on the next apply that changes `config` for another reason;
+to push your configured values back deliberately, taint the resource or make a
+no-op edit to `config`.
+
+{{ .SchemaMarkdown | trimspace }}
+
+{{ if .HasImport -}}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+
+The first plan after an import shows a diff for `config`, because the client
+secret cannot be read back from the API. Applying it re-sends your configured
+values and reconciles the state.
+{{- end }}

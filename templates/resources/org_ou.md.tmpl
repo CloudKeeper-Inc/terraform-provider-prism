@@ -1,0 +1,37 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.RenderedProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+The management account is automatically resolved from your Prism customer configuration — no need to specify it.
+
+{{ if .HasExample -}}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Behavior
+
+- **Create**: Creates the OU under the specified parent, then moves any listed accounts into it.
+- **Read**: Walks the organization tree to find the OU and its child accounts.
+- **Update**: Only the `accounts` attribute can be updated in-place. Accounts added to the set are moved into the OU; accounts removed are moved back to the parent. Changing `name` or `parent_id` forces replacement.
+- **Delete**: Moves all managed accounts back to the parent OU, then deletes the OU. The OU must have no child OUs — delete nested OUs first.
+
+{{ if .HasImport -}}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+
+After import, the `accounts` attribute will be populated with the OU's current child accounts on the next `terraform plan`.
+{{- end }}
