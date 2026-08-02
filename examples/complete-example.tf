@@ -37,19 +37,16 @@ variable "prism_subdomain" {
 resource "prism_aws_account" "production" {
   account_id   = "123456789012"
   account_name = "Production"
-  region       = "us-east-1"
 }
 
 resource "prism_aws_account" "development" {
   account_id   = "234567890123"
   account_name = "Development"
-  region       = "us-east-1"
 }
 
 resource "prism_aws_account" "staging" {
   account_id   = "345678901234"
   account_name = "Staging"
-  region       = "us-east-1"
 }
 
 # ============= Permission Sets =============
@@ -151,21 +148,18 @@ resource "prism_user" "bob_auditor" {
 # ============= Groups =============
 
 resource "prism_group" "admins" {
-  name        = "Administrators"
-  description = "System administrators with full access"
-  path        = "/teams/operations/"
+  name = "Administrators"
+  path = "/teams/operations/"
 }
 
 resource "prism_group" "developers" {
-  name        = "Developers"
-  description = "Development team members"
-  path        = "/teams/engineering/"
+  name = "Developers"
+  path = "/teams/engineering/"
 }
 
 resource "prism_group" "auditors" {
-  name        = "Auditors"
-  description = "Security and compliance auditors"
-  path        = "/teams/compliance/"
+  name = "Auditors"
+  path = "/teams/compliance/"
 }
 
 # ============= Group Memberships =============

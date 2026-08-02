@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -26,12 +27,27 @@ type PermissionSetResource struct {
 }
 
 type PermissionSetResourceModel struct {
-	ID              types.String `tfsdk:"id"`
-	Name            types.String `tfsdk:"name"`
-	Description     types.String `tfsdk:"description"`
-	SessionDuration types.String `tfsdk:"session_duration"`
-	ManagedPolicies types.List   `tfsdk:"managed_policies"`
-	InlinePolicies  types.Map    `tfsdk:"inline_policies"`
+	ID                       types.String `tfsdk:"id"`
+	Name                     types.String `tfsdk:"name"`
+	Description              types.String `tfsdk:"description"`
+	SessionDuration          types.String `tfsdk:"session_duration"`
+	ManagedPolicies          types.List   `tfsdk:"managed_policies"`
+	InlinePolicies           types.Map    `tfsdk:"inline_policies"`
+	RelayState               types.String `tfsdk:"relay_state"`
+	CustomerManagedPolicyIDs types.Set    `tfsdk:"customer_managed_policy_ids"`
+}
+
+// cmpSetFromSlim converts a permission set's attached CMP slim objects into a
+// Terraform set of their ids. Returns a null set when there are none.
+func cmpSetFromSlim(ctx context.Context, slims []CustomerManagedPolicySlim) (types.Set, diag.Diagnostics) {
+	if len(slims) == 0 {
+		return types.SetNull(types.StringType), nil
+	}
+	ids := make([]string, 0, len(slims))
+	for _, s := range slims {
+		ids = append(ids, s.ID)
+	}
+	return types.SetValueFrom(ctx, types.StringType, ids)
 }
 
 func (r *PermissionSetResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -71,6 +87,15 @@ func (r *PermissionSetResource) Schema(ctx context.Context, req resource.SchemaR
 				ElementType:         types.StringType,
 				Optional:            true,
 				MarkdownDescription: "Map of inline IAM policy documents in JSON format. The key is the policy name, and the value is the policy document.",
+			},
+			"relay_state": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Relay state URL the user is sent to after authenticating with this permission set (the initial console page).",
+			},
+			"customer_managed_policy_ids": schema.SetAttribute{
+				ElementType:         types.StringType,
+				Optional:            true,
+				MarkdownDescription: "Set of prism_customer_managed_policy ids to attach to this permission set. Order-insensitive.",
 			},
 		},
 	}
@@ -119,12 +144,22 @@ func (r *PermissionSetResource) Create(ctx context.Context, req resource.CreateR
 		}
 	}
 
+	var cmpIDs []string
+	if !data.CustomerManagedPolicyIDs.IsNull() && !data.CustomerManagedPolicyIDs.IsUnknown() {
+		resp.Diagnostics.Append(data.CustomerManagedPolicyIDs.ElementsAs(ctx, &cmpIDs, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	permSet := &PermissionSet{
-		Name:            data.Name.ValueString(),
-		Description:     data.Description.ValueString(),
-		SessionDuration: data.SessionDuration.ValueString(),
-		ManagedPolicies: managedPolicies,
-		InlinePolicies:  inlinePolicies,
+		Name:                     data.Name.ValueString(),
+		Description:              data.Description.ValueString(),
+		SessionDuration:          data.SessionDuration.ValueString(),
+		ManagedPolicies:          managedPolicies,
+		InlinePolicies:           inlinePolicies,
+		RelayState:               data.RelayState.ValueString(),
+		CustomerManagedPolicyIDs: cmpIDs,
 	}
 
 	created, err := r.client.CreatePermissionSet(permSet)
@@ -138,6 +173,9 @@ func (r *PermissionSetResource) Create(ctx context.Context, req resource.CreateR
 	data.Description = types.StringValue(created.Description)
 	if created.SessionDuration != "" {
 		data.SessionDuration = types.StringValue(created.SessionDuration)
+	}
+	if created.RelayState != "" {
+		data.RelayState = types.StringValue(created.RelayState)
 	}
 
 	// Convert managed policies back to list
@@ -158,6 +196,15 @@ func (r *PermissionSetResource) Create(ctx context.Context, req resource.CreateR
 			return
 		}
 		data.InlinePolicies = inlinePoliciesMap
+	}
+
+	if len(created.CustomerManagedPolicies) > 0 {
+		cmpSet, cmpDiags := cmpSetFromSlim(ctx, created.CustomerManagedPolicies)
+		resp.Diagnostics.Append(cmpDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.CustomerManagedPolicyIDs = cmpSet
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -182,6 +229,9 @@ func (r *PermissionSetResource) Read(ctx context.Context, req resource.ReadReque
 	if permSet.SessionDuration != "" {
 		data.SessionDuration = types.StringValue(permSet.SessionDuration)
 	}
+	if permSet.RelayState != "" {
+		data.RelayState = types.StringValue(permSet.RelayState)
+	}
 
 	if len(permSet.ManagedPolicies) > 0 {
 		managedPoliciesList, diags := types.ListValueFrom(ctx, types.StringType, permSet.ManagedPolicies)
@@ -199,6 +249,15 @@ func (r *PermissionSetResource) Read(ctx context.Context, req resource.ReadReque
 			return
 		}
 		data.InlinePolicies = inlinePoliciesMap
+	}
+
+	if len(permSet.CustomerManagedPolicies) > 0 {
+		cmpSet, cmpDiags := cmpSetFromSlim(ctx, permSet.CustomerManagedPolicies)
+		resp.Diagnostics.Append(cmpDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.CustomerManagedPolicyIDs = cmpSet
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -229,12 +288,22 @@ func (r *PermissionSetResource) Update(ctx context.Context, req resource.UpdateR
 		}
 	}
 
+	var cmpIDs []string
+	if !data.CustomerManagedPolicyIDs.IsNull() && !data.CustomerManagedPolicyIDs.IsUnknown() {
+		resp.Diagnostics.Append(data.CustomerManagedPolicyIDs.ElementsAs(ctx, &cmpIDs, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	permSet := &PermissionSet{
-		Name:            data.Name.ValueString(),
-		Description:     data.Description.ValueString(),
-		SessionDuration: data.SessionDuration.ValueString(),
-		ManagedPolicies: managedPolicies,
-		InlinePolicies:  inlinePolicies,
+		Name:                     data.Name.ValueString(),
+		Description:              data.Description.ValueString(),
+		SessionDuration:          data.SessionDuration.ValueString(),
+		ManagedPolicies:          managedPolicies,
+		InlinePolicies:           inlinePolicies,
+		RelayState:               data.RelayState.ValueString(),
+		CustomerManagedPolicyIDs: cmpIDs,
 	}
 
 	updated, err := r.client.UpdatePermissionSet(data.ID.ValueString(), permSet)
@@ -247,6 +316,9 @@ func (r *PermissionSetResource) Update(ctx context.Context, req resource.UpdateR
 	data.Description = types.StringValue(updated.Description)
 	if updated.SessionDuration != "" {
 		data.SessionDuration = types.StringValue(updated.SessionDuration)
+	}
+	if updated.RelayState != "" {
+		data.RelayState = types.StringValue(updated.RelayState)
 	}
 
 	if len(updated.ManagedPolicies) > 0 {
@@ -265,6 +337,15 @@ func (r *PermissionSetResource) Update(ctx context.Context, req resource.UpdateR
 			return
 		}
 		data.InlinePolicies = inlinePoliciesMap
+	}
+
+	if len(updated.CustomerManagedPolicies) > 0 {
+		cmpSet, cmpDiags := cmpSetFromSlim(ctx, updated.CustomerManagedPolicies)
+		resp.Diagnostics.Append(cmpDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		data.CustomerManagedPolicyIDs = cmpSet
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

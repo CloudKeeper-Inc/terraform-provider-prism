@@ -24,10 +24,9 @@ type GroupResource struct {
 }
 
 type GroupResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	Path        types.String `tfsdk:"path"`
+	ID   types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	Path types.String `tfsdk:"path"`
 }
 
 func (r *GroupResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -49,11 +48,6 @@ func (r *GroupResource) Schema(ctx context.Context, req resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				Required:            true,
 				MarkdownDescription: "The name of the group",
-			},
-			"description": schema.StringAttribute{
-				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "A description of the group",
 			},
 			"path": schema.StringAttribute{
 				Optional:            true,
@@ -90,9 +84,8 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 
 	group := &Group{
-		Name:        data.Name.ValueString(),
-		Description: data.Description.ValueString(),
-		Path:        data.Path.ValueString(),
+		Name: data.Name.ValueString(),
+		Path: data.Path.ValueString(),
 	}
 
 	created, err := r.client.CreateGroup(group)
@@ -103,7 +96,6 @@ func (r *GroupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	data.ID = types.StringValue(created.ID)
 	data.Name = types.StringValue(created.Name)
-	data.Description = types.StringValue(created.Description)
 	data.Path = types.StringValue(created.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -124,7 +116,6 @@ func (r *GroupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	}
 
 	data.Name = types.StringValue(group.Name)
-	data.Description = types.StringValue(group.Description)
 	data.Path = types.StringValue(group.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -139,9 +130,8 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	group := &Group{
-		Name:        data.Name.ValueString(),
-		Description: data.Description.ValueString(),
-		Path:        data.Path.ValueString(),
+		Name: data.Name.ValueString(),
+		Path: data.Path.ValueString(),
 	}
 
 	updated, err := r.client.UpdateGroup(data.Name.ValueString(), group)
@@ -151,7 +141,6 @@ func (r *GroupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 
 	data.Name = types.StringValue(updated.Name)
-	data.Description = types.StringValue(updated.Description)
 	data.Path = types.StringValue(updated.Path)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)

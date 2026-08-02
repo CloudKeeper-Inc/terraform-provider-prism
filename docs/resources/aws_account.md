@@ -13,10 +13,23 @@ Manages an AWS account onboarded to CloudKeeper. This resource sets up SAML/OIDC
 ## Example Usage
 
 ```terraform
+# Onboard an EXISTING AWS account.
 resource "prism_aws_account" "production" {
   account_id   = "123456789012"
   account_name = "Production"
-  region       = "us-east-1"
+}
+
+# Create a BRAND-NEW AWS account via the Account Factory.
+# Requires the customer to have Org Services + a management account configured;
+# otherwise apply fails fast with an "Account creation not enabled" error.
+resource "prism_aws_account" "new_prod" {
+  create_new      = true
+  account_name    = "Acme Prod"
+  root_email      = "aws-acme-prod@example.com"
+  admin_role_name = "OrgAdminAccess"
+  master_account  = "857639285487"
+  owner_emails    = ["ops@example.com"]
+  create_timeout  = "45m"
 }
 ```
 
@@ -25,14 +38,17 @@ resource "prism_aws_account" "production" {
 
 ### Required
 
-- `account_id` (String) The AWS account ID (12-digit number)
 - `account_name` (String) A friendly name for the AWS account
 
 ### Optional
 
+- `account_id` (String) The AWS account ID (12-digit). Required in onboard mode; computed by the factory in create mode.
+- `admin_role_name` (String) Create mode only: name of an IAM role created in the new account with AdministratorAccess, assumable from master_account. Required when create_new = true.
+- `create_new` (Boolean) When true, Prism creates a brand-new AWS account via the Account Factory instead of onboarding an existing one. Requires root_email, admin_role_name and master_account, and management-account/Org-Services must be enabled for the customer.
+- `create_timeout` (String) Create mode only: maximum time to wait for the factory + onboarding to finish (Go duration, e.g. "45m").
+- `master_account` (String) Create mode only: 12-digit account whose root the admin role trusts. Required when create_new = true.
 - `owner_emails` (List of String) List of owner email addresses for JIT (Just-In-Time) access approvals
-- `region` (String) The primary AWS region for this account
-- `role_arn` (String) The ARN of the IAM role used for cross-account access
+- `root_email` (String) Create mode only: the root-user email for the new AWS account. Required when create_new = true.
 
 ### Read-Only
 

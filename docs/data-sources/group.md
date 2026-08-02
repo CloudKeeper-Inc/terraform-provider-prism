@@ -21,6 +21,5 @@ Fetches information about a CloudKeeper group.
 
 ### Read-Only
 
-- `description` (String) A description of the group
 - `id` (String) The unique identifier for the group
 - `path` (String) The path of the group (for hierarchical groups)

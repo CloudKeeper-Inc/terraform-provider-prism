@@ -185,6 +185,7 @@ func (p *CloudKeeperProvider) Resources(ctx context.Context) []func() resource.R
 		NewOrgPolicyResource,
 		NewOrgPolicyAttachmentResource,
 		NewOrgOUResource,
+		NewCustomerManagedPolicyResource,
 	}
 }
 

@@ -13,44 +13,19 @@ Manages a CloudKeeper permission set. Permission sets define the IAM policies an
 ## Example Usage
 
 ```terraform
-resource "prism_permission_set" "developer" {
-  name             = "DeveloperAccess"
-  description      = "Developer access permissions"
+resource "prism_customer_managed_policy" "s3_read" {
+  name            = "S3ReadOnly"
+  policy_document = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = ["s3:Get*", "s3:List*"], Resource = "*" }] })
+}
+
+resource "prism_permission_set" "example" {
+  name             = "ReadOnlyWithConsoleHome"
+  description      = "Read-only access, lands on the S3 console"
   session_duration = "PT4H"
+  relay_state      = "https://console.aws.amazon.com/s3/home"
+  managed_policies = ["arn:aws:iam::aws:policy/ReadOnlyAccess"]
 
-  managed_policies = [
-    "arn:aws:iam::aws:policy/ReadOnlyAccess"
-  ]
-
-  inline_policies = {
-    s3_access = jsonencode({
-      Version = "2012-10-17"
-      Statement = [
-        {
-          Effect = "Allow"
-          Action = [
-            "s3:ListBucket",
-            "s3:GetObject",
-            "s3:PutObject"
-          ]
-          Resource = "*"
-        }
-      ]
-    })
-    lambda_basic = jsonencode({
-      Version = "2012-10-17"
-      Statement = [
-        {
-          Effect = "Allow"
-          Action = [
-            "lambda:GetFunction",
-            "lambda:ListFunctions"
-          ]
-          Resource = "*"
-        }
-      ]
-    })
-  }
+  customer_managed_policy_ids = [prism_customer_managed_policy.s3_read.id]
 }
 ```
 
@@ -63,9 +38,11 @@ resource "prism_permission_set" "developer" {
 
 ### Optional
 
+- `customer_managed_policy_ids` (Set of String) Set of prism_customer_managed_policy ids to attach to this permission set. Order-insensitive.
 - `description` (String) A description of the permission set
 - `inline_policies` (Map of String) Map of inline IAM policy documents in JSON format. The key is the policy name, and the value is the policy document.
 - `managed_policies` (List of String) List of AWS managed policy ARNs to attach
+- `relay_state` (String) Relay state URL the user is sent to after authenticating with this permission set (the initial console page).
 - `session_duration` (String) The session duration in ISO 8601 format (e.g., PT4H for 4 hours)
 
 ### Read-Only

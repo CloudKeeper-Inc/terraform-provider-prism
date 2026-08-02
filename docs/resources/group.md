@@ -14,9 +14,8 @@ Manages a CloudKeeper group in a customer realm.
 
 ```terraform
 resource "prism_group" "developers" {
-  name        = "Developers"
-  description = "Development team group"
-  path        = "/teams/engineering/"
+  name = "Developers"
+  path = "/teams/engineering/"
 }
 ```
 
@@ -29,7 +28,6 @@ resource "prism_group" "developers" {
 
 ### Optional
 
-- `description` (String) A description of the group
 - `path` (String) The path of the group (for hierarchical groups)
 
 ### Read-Only

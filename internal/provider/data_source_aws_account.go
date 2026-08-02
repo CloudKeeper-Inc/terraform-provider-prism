@@ -23,8 +23,6 @@ type AWSAccountDataSourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	AccountID   types.String `tfsdk:"account_id"`
 	AccountName types.String `tfsdk:"account_name"`
-	Region      types.String `tfsdk:"region"`
-	RoleArn     types.String `tfsdk:"role_arn"`
 	OwnerEmails types.List   `tfsdk:"owner_emails"`
 }
 
@@ -48,14 +46,6 @@ func (d *AWSAccountDataSource) Schema(ctx context.Context, req datasource.Schema
 			"account_name": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "A friendly name for the AWS account",
-			},
-			"region": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The primary AWS region for this account",
-			},
-			"role_arn": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "The ARN of the IAM role used for cross-account access",
 			},
 			"owner_emails": schema.ListAttribute{
 				Computed:            true,
@@ -99,12 +89,6 @@ func (d *AWSAccountDataSource) Read(ctx context.Context, req datasource.ReadRequ
 
 	data.ID = types.StringValue(account.ID)
 	data.AccountName = types.StringValue(account.AccountName)
-	if account.Region != "" {
-		data.Region = types.StringValue(account.Region)
-	}
-	if account.RoleArn != "" {
-		data.RoleArn = types.StringValue(account.RoleArn)
-	}
 
 	// Set owner_emails from API response
 	if len(account.OwnerEmails) > 0 {

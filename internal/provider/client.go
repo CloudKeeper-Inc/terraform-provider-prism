@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,18 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// APIError carries the HTTP status of a failed API call so callers can branch on
+// it (e.g. 403 => feature not enabled). Error() keeps the previous fmt.Errorf
+// format, so existing substring checks (e.g. "404") continue to work.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error (%d): %s", e.StatusCode, e.Body)
+}
 
 // Global counter for API call sequence tracking
 var apiCallCounter int64
@@ -105,7 +118,7 @@ func (c *Client) doRequestRaw(method, path string, body interface{}) ([]byte, er
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	return respBody, nil
@@ -214,8 +227,6 @@ type AWSAccount struct {
 	CustomerID  string   `json:"customer_id,omitempty"`
 	AccountID   string   `json:"account_id"`
 	AccountName string   `json:"name"`
-	Region      string   `json:"region,omitempty"`
-	RoleArn     string   `json:"role_arn,omitempty"`
 	OwnerEmails []string `json:"owner_emails,omitempty"`
 }
 
@@ -243,8 +254,6 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 			AccountID   string   `json:"account_id"`
 			Name        string   `json:"name"`
 			Status      string   `json:"status"`
-			Region      string   `json:"region,omitempty"`
-			RoleArn     string   `json:"role_arn,omitempty"`
 			OwnerEmails []string `json:"owner_emails,omitempty"`
 		} `json:"account"`
 	}
@@ -258,8 +267,6 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 		ID:          response.Account.ID,
 		AccountID:   response.Account.AccountID,
 		AccountName: response.Account.Name,
-		Region:      response.Account.Region,
-		RoleArn:     response.Account.RoleArn,
 		OwnerEmails: response.Account.OwnerEmails,
 	}
 
@@ -278,6 +285,69 @@ func (c *Client) GetAWSAccount(accountID string) (*AWSAccount, error) {
 	}
 
 	return &result, nil
+}
+
+// ========== Account Factory Operations ==========
+
+// ErrFeatureNotEnabled is returned by CreateAccountViaFactory when the customer
+// has no management account configured (the create endpoint answers 403 before
+// launching anything).
+var ErrFeatureNotEnabled = errors.New("account creation is not enabled for this customer: no management account is configured")
+
+// FactoryCreateInput is the body for POST /accountfactory/create (camelCase to
+// match the prism-main handler).
+type FactoryCreateInput struct {
+	AccountName       string   `json:"accountName"`
+	RootEmail         string   `json:"rootEmail"`
+	OwnerEmails       []string `json:"ownerEmails,omitempty"`
+	AdminRoleName     string   `json:"adminRoleName"`
+	AdminTrustAccount string   `json:"adminTrustAccount"`
+}
+
+// FactoryStatus is the slice of the operation row the resource polls.
+type FactoryStatus struct {
+	Status        string `json:"status"`
+	Progress      int    `json:"progress"`
+	ProgressLabel string `json:"progressLabel"`
+	AWSAccountID  string `json:"awsAccountId"`
+	FailureReason string `json:"failureReason"`
+	ErrorMessage  string `json:"errorMessage"`
+}
+
+// CreateAccountViaFactory launches an account-factory run and returns its
+// operation id. A 403 (feature gate) is mapped to ErrFeatureNotEnabled.
+func (c *Client) CreateAccountViaFactory(in FactoryCreateInput) (string, error) {
+	body, err := c.doRequestCustomerRaw("POST", "/accountfactory/create", in)
+	if err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusForbidden {
+			return "", ErrFeatureNotEnabled
+		}
+		return "", err
+	}
+	var resp struct {
+		OperationID string `json:"operationId"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse create response: %w", err)
+	}
+	if resp.OperationID == "" {
+		return "", fmt.Errorf("account factory returned no operation id")
+	}
+	return resp.OperationID, nil
+}
+
+// GetFactoryStatus fetches the live status of a create operation.
+func (c *Client) GetFactoryStatus(operationID string) (*FactoryStatus, error) {
+	body, err := c.doRequestCustomerRaw("GET", fmt.Sprintf("/accountfactory/create/%s/status", operationID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var st FactoryStatus
+	if err := json.Unmarshal(body, &st); err != nil {
+		return nil, fmt.Errorf("failed to parse status response: %w", err)
+	}
+	return &st, nil
 }
 
 func (c *Client) UpdateAWSAccount(accountID string, account *AWSAccount) (*AWSAccount, error) {
@@ -322,6 +392,19 @@ type PermissionSet struct {
 	SessionDuration string            `json:"session_duration,omitempty"`
 	ManagedPolicies []string          `json:"managed_policies,omitempty"`
 	InlinePolicies  map[string]string `json:"inline_policies,omitempty"`
+	RelayState      string            `json:"relay_state,omitempty"`
+	// CustomerManagedPolicyIDs is the SEND side: attach these CMP ids to the PS.
+	CustomerManagedPolicyIDs []string `json:"customer_managed_policy_ids,omitempty"`
+	// CustomerManagedPolicies is the RECEIVE side: the backend returns the attached
+	// CMPs as slim {id,name,description} objects.
+	CustomerManagedPolicies []CustomerManagedPolicySlim `json:"customer_managed_policies,omitempty"`
+}
+
+// CustomerManagedPolicySlim is the attached-CMP shape in a permission-set response.
+type CustomerManagedPolicySlim struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func (c *Client) CreatePermissionSet(permSet *PermissionSet) (*PermissionSet, error) {
@@ -530,7 +613,6 @@ type Group struct {
 	ID          string   `json:"id,omitempty"`
 	CustomerID  string   `json:"customerId"`
 	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
 	Path        string   `json:"path,omitempty"`
 	Members     []string `json:"members,omitempty"`
 }
@@ -1416,4 +1498,56 @@ func waitForDependency(ctx context.Context, resourceType, resourceID string, che
 	}
 
 	return fmt.Errorf("timed out after %s waiting for %s %q to become available", maxWait, resourceType, resourceID)
+}
+
+// ========== Customer Managed Policy Operations ==========
+// The CMP endpoints return RAW JSON (no {success,data} envelope), so these use
+// doRequestCustomerRaw.
+
+type CustomerManagedPolicy struct {
+	ID             string `json:"id,omitempty"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	PolicyDocument string `json:"policy_document"`
+}
+
+func (c *Client) CreateCustomerManagedPolicy(p *CustomerManagedPolicy) (*CustomerManagedPolicy, error) {
+	body, err := c.doRequestCustomerRaw("POST", "/customer-managed-policies", p)
+	if err != nil {
+		return nil, err
+	}
+	var result CustomerManagedPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) GetCustomerManagedPolicy(id string) (*CustomerManagedPolicy, error) {
+	body, err := c.doRequestCustomerRaw("GET", fmt.Sprintf("/customer-managed-policies/%s", id), nil)
+	if err != nil {
+		return nil, err
+	}
+	var result CustomerManagedPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) UpdateCustomerManagedPolicy(id string, p *CustomerManagedPolicy) (*CustomerManagedPolicy, error) {
+	body, err := c.doRequestCustomerRaw("PUT", fmt.Sprintf("/customer-managed-policies/%s", id), p)
+	if err != nil {
+		return nil, err
+	}
+	var result CustomerManagedPolicy
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) DeleteCustomerManagedPolicy(id string) error {
+	_, err := c.doRequestCustomerRaw("DELETE", fmt.Sprintf("/customer-managed-policies/%s", id), nil)
+	return err
 }

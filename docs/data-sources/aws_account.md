@@ -24,5 +24,3 @@ Fetches information about an AWS account onboarded to CloudKeeper.
 - `account_name` (String) A friendly name for the AWS account
 - `id` (String) The internal identifier for this AWS account configuration
 - `owner_emails` (List of String) List of owner email addresses for JIT (Just-In-Time) access approvals
-- `region` (String) The primary AWS region for this account
-- `role_arn` (String) The ARN of the IAM role used for cross-account access

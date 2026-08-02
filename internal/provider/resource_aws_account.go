@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,13 +10,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 var _ resource.Resource = &AWSAccountResource{}
 var _ resource.ResourceWithImportState = &AWSAccountResource{}
+var _ resource.ResourceWithValidateConfig = &AWSAccountResource{}
 
 func NewAWSAccountResource() resource.Resource {
 	return &AWSAccountResource{}
@@ -26,12 +31,15 @@ type AWSAccountResource struct {
 }
 
 type AWSAccountResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	AccountID   types.String `tfsdk:"account_id"`
-	AccountName types.String `tfsdk:"account_name"`
-	Region      types.String `tfsdk:"region"`
-	RoleArn     types.String `tfsdk:"role_arn"`
-	OwnerEmails types.List   `tfsdk:"owner_emails"`
+	ID            types.String `tfsdk:"id"`
+	CreateNew     types.Bool   `tfsdk:"create_new"`
+	AccountID     types.String `tfsdk:"account_id"`
+	AccountName   types.String `tfsdk:"account_name"`
+	RootEmail     types.String `tfsdk:"root_email"`
+	AdminRoleName types.String `tfsdk:"admin_role_name"`
+	MasterAccount types.String `tfsdk:"master_account"`
+	OwnerEmails   types.List   `tfsdk:"owner_emails"`
+	CreateTimeout types.String `tfsdk:"create_timeout"`
 }
 
 func (r *AWSAccountResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -50,10 +58,21 @@ func (r *AWSAccountResource) Schema(ctx context.Context, req resource.SchemaRequ
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"create_new": schema.BoolAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
+				MarkdownDescription: "When true, Prism creates a brand-new AWS account via the Account Factory instead of onboarding an existing one. Requires root_email, admin_role_name and master_account, and management-account/Org-Services must be enabled for the customer.",
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.RequiresReplace(),
+				},
+			},
 			"account_id": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The AWS account ID (12-digit number)",
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "The AWS account ID (12-digit). Required in onboard mode; computed by the factory in create mode.",
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -61,19 +80,37 @@ func (r *AWSAccountResource) Schema(ctx context.Context, req resource.SchemaRequ
 				Required:            true,
 				MarkdownDescription: "A friendly name for the AWS account",
 			},
-			"region": schema.StringAttribute{
+			"root_email": schema.StringAttribute{
 				Optional:            true,
-				MarkdownDescription: "The primary AWS region for this account",
+				MarkdownDescription: "Create mode only: the root-user email for the new AWS account. Required when create_new = true.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
-			"role_arn": schema.StringAttribute{
+			"admin_role_name": schema.StringAttribute{
 				Optional:            true,
-				Computed:            true,
-				MarkdownDescription: "The ARN of the IAM role used for cross-account access",
+				MarkdownDescription: "Create mode only: name of an IAM role created in the new account with AdministratorAccess, assumable from master_account. Required when create_new = true.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"master_account": schema.StringAttribute{
+				Optional:            true,
+				MarkdownDescription: "Create mode only: 12-digit account whose root the admin role trusts. Required when create_new = true.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
 			},
 			"owner_emails": schema.ListAttribute{
 				Optional:            true,
 				ElementType:         types.StringType,
 				MarkdownDescription: "List of owner email addresses for JIT (Just-In-Time) access approvals",
+			},
+			"create_timeout": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("45m"),
+				MarkdownDescription: "Create mode only: maximum time to wait for the factory + onboarding to finish (Go duration, e.g. \"45m\").",
 			},
 		},
 	}
@@ -104,6 +141,11 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		return
 	}
 
+	if data.CreateNew.ValueBool() {
+		r.createViaFactory(ctx, &data, resp)
+		return
+	}
+
 	// Convert owner_emails from types.List to []string
 	var ownerEmails []string
 	if !data.OwnerEmails.IsNull() && !data.OwnerEmails.IsUnknown() {
@@ -117,8 +159,6 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 	account := &AWSAccount{
 		AccountID:   data.AccountID.ValueString(),
 		AccountName: data.AccountName.ValueString(),
-		Region:      data.Region.ValueString(),
-		RoleArn:     data.RoleArn.ValueString(),
 		OwnerEmails: ownerEmails,
 	}
 
@@ -141,20 +181,6 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		data.AccountName = types.StringValue(created.AccountName)
 	}
 
-	// Only update region if API returned a non-empty value
-	if created.Region != "" {
-		data.Region = types.StringValue(created.Region)
-	}
-
-	// Set role_arn: use API value if provided, otherwise compute default
-	if created.RoleArn != "" {
-		data.RoleArn = types.StringValue(created.RoleArn)
-	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
-		// Compute default role ARN if not provided
-		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
-		data.RoleArn = types.StringValue(defaultRoleArn)
-	}
-
 	// Set owner_emails from API response
 	if len(created.OwnerEmails) > 0 {
 		ownerEmailsList, diags := types.ListValueFrom(ctx, types.StringType, created.OwnerEmails)
@@ -170,6 +196,111 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
 
+// createViaFactory drives the async Account Factory: launch, poll to completion,
+// then poll until Prism onboarding lands, all within create_timeout (default 45m).
+func (r *AWSAccountResource) createViaFactory(ctx context.Context, data *AWSAccountResourceModel, resp *resource.CreateResponse) {
+	var ownerEmails []string
+	if !data.OwnerEmails.IsNull() && !data.OwnerEmails.IsUnknown() {
+		resp.Diagnostics.Append(data.OwnerEmails.ElementsAs(ctx, &ownerEmails, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	timeout := 45 * time.Minute
+	if !data.CreateTimeout.IsNull() && data.CreateTimeout.ValueString() != "" {
+		d, err := time.ParseDuration(data.CreateTimeout.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddAttributeError(path.Root("create_timeout"), "Invalid create_timeout", err.Error())
+			return
+		}
+		timeout = d
+	}
+	deadline := time.Now().Add(timeout)
+
+	opID, err := r.client.CreateAccountViaFactory(FactoryCreateInput{
+		AccountName:       data.AccountName.ValueString(),
+		RootEmail:         data.RootEmail.ValueString(),
+		OwnerEmails:       ownerEmails,
+		AdminRoleName:     data.AdminRoleName.ValueString(),
+		AdminTrustAccount: data.MasterAccount.ValueString(),
+	})
+	if err != nil {
+		if errors.Is(err, ErrFeatureNotEnabled) {
+			resp.Diagnostics.AddError("Account creation not enabled",
+				"Account creation is not enabled for this customer: no management account is configured. "+
+					"Enable Org Services and configure a management account before using create_new = true.")
+			return
+		}
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to launch account factory: %s", err))
+		return
+	}
+
+	// Phase A: factory pipeline -> completed (captures the new account id).
+	accountID := ""
+	for {
+		st, sErr := r.client.GetFactoryStatus(opID)
+		if sErr == nil {
+			if st.Status == "completed" && st.AWSAccountID != "" {
+				accountID = st.AWSAccountID
+				break
+			}
+			if st.Status == "failed" {
+				reason := strings.TrimSpace(st.FailureReason + " " + st.ErrorMessage)
+				if reason == "" {
+					reason = "unknown reason"
+				}
+				resp.Diagnostics.AddError("Account creation failed", fmt.Sprintf("Account factory failed (operation %s): %s", opID, reason))
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			resp.Diagnostics.AddError("Account creation timed out",
+				fmt.Sprintf("Account factory did not complete within %s (operation %s). It may still finish server-side; re-apply to resume.", timeout, opID))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			resp.Diagnostics.AddError("Account creation canceled", ctx.Err().Error())
+			return
+		case <-time.After(10 * time.Second):
+		}
+	}
+
+	// Phase B: wait for Prism onboarding (GET /aws-accounts/{id} succeeds).
+	for {
+		acct, aErr := r.client.GetAWSAccount(accountID)
+		if aErr == nil && acct != nil {
+			data.ID = types.StringValue(accountID)
+			data.AccountID = types.StringValue(accountID)
+			if acct.AccountName != "" {
+				data.AccountName = types.StringValue(acct.AccountName)
+			}
+			if len(acct.OwnerEmails) > 0 {
+				l, d := types.ListValueFrom(ctx, types.StringType, acct.OwnerEmails)
+				resp.Diagnostics.Append(d...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+				data.OwnerEmails = l
+			}
+			resp.Diagnostics.Append(resp.State.Set(ctx, data)...)
+			return
+		}
+		if time.Now().After(deadline) {
+			resp.Diagnostics.AddError("Onboarding timed out",
+				fmt.Sprintf("Account %s was created but did not finish Prism onboarding within %s. Recover by setting create_new = false and account_id = %q on the next apply.", accountID, timeout, accountID))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			resp.Diagnostics.AddError("Account creation canceled", ctx.Err().Error())
+			return
+		case <-time.After(10 * time.Second):
+		}
+	}
+}
+
 func (r *AWSAccountResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var data AWSAccountResourceModel
 
@@ -180,6 +311,10 @@ func (r *AWSAccountResource) Read(ctx context.Context, req resource.ReadRequest,
 
 	account, err := r.client.GetAWSAccount(data.AccountID.ValueString())
 	if err != nil {
+		if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read AWS account, got error: %s", err))
 		return
 	}
@@ -187,20 +322,6 @@ func (r *AWSAccountResource) Read(ctx context.Context, req resource.ReadRequest,
 	// Only update account_name if API returned a non-empty value, otherwise preserve state value
 	if account.AccountName != "" {
 		data.AccountName = types.StringValue(account.AccountName)
-	}
-
-	// Only update region if API returned a non-empty value
-	if account.Region != "" {
-		data.Region = types.StringValue(account.Region)
-	}
-
-	// Set role_arn: use API value if provided, otherwise compute default
-	if account.RoleArn != "" {
-		data.RoleArn = types.StringValue(account.RoleArn)
-	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
-		// Compute default role ARN
-		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
-		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
 	// Set owner_emails from API response
@@ -239,8 +360,6 @@ func (r *AWSAccountResource) Update(ctx context.Context, req resource.UpdateRequ
 	account := &AWSAccount{
 		AccountID:   data.AccountID.ValueString(),
 		AccountName: data.AccountName.ValueString(),
-		Region:      data.Region.ValueString(),
-		RoleArn:     data.RoleArn.ValueString(),
 		OwnerEmails: ownerEmails,
 	}
 
@@ -253,20 +372,6 @@ func (r *AWSAccountResource) Update(ctx context.Context, req resource.UpdateRequ
 	// Only update account_name if API returned a non-empty value, otherwise preserve plan value
 	if updated.AccountName != "" {
 		data.AccountName = types.StringValue(updated.AccountName)
-	}
-
-	// Only update region if API returned a non-empty value
-	if updated.Region != "" {
-		data.Region = types.StringValue(updated.Region)
-	}
-
-	// Set role_arn: use API value if provided, otherwise compute default
-	if updated.RoleArn != "" {
-		data.RoleArn = types.StringValue(updated.RoleArn)
-	} else if data.RoleArn.IsNull() || data.RoleArn.ValueString() == "" {
-		// Compute default role ARN
-		defaultRoleArn := fmt.Sprintf("arn:aws:iam::%s:role/CloudKeeper-SSO-Role", data.AccountID.ValueString())
-		data.RoleArn = types.StringValue(defaultRoleArn)
 	}
 
 	// Set owner_emails from API response
@@ -386,6 +491,26 @@ func (r *AWSAccountResource) Delete(ctx context.Context, req resource.DeleteRequ
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to delete AWS account, got error: %s", err))
 		return
+	}
+}
+
+func (r *AWSAccountResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var data AWSAccountResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// Interpolated (unknown) values can't be validated at plan-config time — a
+	// value referencing another resource is unknown until apply. Skip validation
+	// when create_new or any mode-relevant attribute is unknown; the apply-time
+	// logic and the backend still enforce correctness.
+	if data.CreateNew.IsUnknown() || data.AccountID.IsUnknown() ||
+		data.RootEmail.IsUnknown() || data.AdminRoleName.IsUnknown() ||
+		data.MasterAccount.IsUnknown() {
+		return
+	}
+	for _, is := range validateAccountMode(data) {
+		resp.Diagnostics.AddAttributeError(path.Root(is.Attr), is.Summary, is.Detail)
 	}
 }
 

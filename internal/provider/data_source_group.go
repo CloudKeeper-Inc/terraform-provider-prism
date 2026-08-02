@@ -20,10 +20,9 @@ type GroupDataSource struct {
 }
 
 type GroupDataSourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	Path        types.String `tfsdk:"path"`
+	ID   types.String `tfsdk:"id"`
+	Name types.String `tfsdk:"name"`
+	Path types.String `tfsdk:"path"`
 }
 
 func (d *GroupDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -42,10 +41,6 @@ func (d *GroupDataSource) Schema(ctx context.Context, req datasource.SchemaReque
 			"name": schema.StringAttribute{
 				Required:            true,
 				MarkdownDescription: "The name of the group",
-			},
-			"description": schema.StringAttribute{
-				Computed:            true,
-				MarkdownDescription: "A description of the group",
 			},
 			"path": schema.StringAttribute{
 				Computed:            true,
@@ -87,7 +82,6 @@ func (d *GroupDataSource) Read(ctx context.Context, req datasource.ReadRequest, 
 	}
 
 	data.ID = types.StringValue(group.ID)
-	data.Description = types.StringValue(group.Description)
 	if group.Path != "" {
 		data.Path = types.StringValue(group.Path)
 	}
