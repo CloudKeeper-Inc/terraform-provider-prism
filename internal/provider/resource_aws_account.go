@@ -18,6 +18,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+// crossAccountRoleName is the role Prism assumes in a target account to create
+// the SAML/OIDC providers. It is fixed deployment-wide configuration; it appears
+// here only so the preflight can name it in its remediation message.
+const crossAccountRoleName = "CloudKeeper-SSO-Role"
+
 var _ resource.Resource = &AWSAccountResource{}
 var _ resource.ResourceWithImportState = &AWSAccountResource{}
 var _ resource.ResourceWithValidateConfig = &AWSAccountResource{}
@@ -162,9 +167,38 @@ func (r *AWSAccountResource) Create(ctx context.Context, req resource.CreateRequ
 		OwnerEmails: ownerEmails,
 	}
 
+	// Preflight: prove Prism can assume its cross-account role before attempting
+	// the onboard itself, so a target account that cannot be onboarded is never
+	// half-processed server-side. Onboard path only -- createViaFactory returned
+	// above, and the factory provisions this role as part of creating the
+	// account, so probing there would be a guaranteed-pass extra call.
+	if err := r.client.PreflightAWSAccount(account.AccountID, account.AccountName); err != nil {
+		resp.Diagnostics.AddError(
+			fmt.Sprintf("Cannot assume %s in AWS account %s", crossAccountRoleName, account.AccountID),
+			fmt.Sprintf("Prism could not assume its cross-account role in %s, so onboarding was not attempted and nothing was changed.\n\n"+
+				"AWS reported: %s\n\n"+
+				"The role is %s. It is deployment-wide configuration rather than something this resource sets, so the fix is in the target account, not in Terraform. "+
+				"The usual causes are that the role is absent from %s -- a StackSet that provisioned it may have been removed, which is what happens when an account leaves its previous AWS organization -- "+
+				"or that its trust policy no longer matches the Prism principal or its ExternalId.",
+				account.AccountID, err, crossAccountRoleName, account.AccountID),
+		)
+		return
+	}
+
 	created, err := r.client.CreateAWSAccount(account)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to create AWS account, got error: %s", err))
+		return
+	}
+
+	// Guard the one attribute Terraform can never recover from. CreateAWSAccount
+	// already rejects a response with no account record, so this only fires if a
+	// future code path stops doing that -- an empty id in state means a resource
+	// Terraform believes it owns but that does not exist in Prism, and every
+	// later plan/refresh/destroy for it is wrong.
+	if created.ID == "" {
+		resp.Diagnostics.AddError("Client Error",
+			fmt.Sprintf("Prism returned no account record id for AWS account %s; the account was not onboarded.", data.AccountID.ValueString()))
 		return
 	}
 

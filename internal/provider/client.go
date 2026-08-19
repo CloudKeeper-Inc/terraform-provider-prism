@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -230,6 +231,134 @@ type AWSAccount struct {
 	OwnerEmails []string `json:"owner_emails,omitempty"`
 }
 
+// onboardData is the `data` object of POST /accounts/onboard.
+//
+// As of prism-main 2.0.0 the handler answered HTTP 200 with success:true
+// whether the onboard succeeded, failed or was skipped, and only the *shape* of
+// data.account told the three apart: an AWSAccountResponse on success, an
+// AccountOnboardingError ({"account":{...},"error":"..."}) on failure, and the
+// bare SSOAccount echo when the account was skipped. prism-main is being
+// changed to answer non-2xx for the failure cases, and customers run older
+// self-hosted versions either way, so this decoding handles both.
+//
+// Account is therefore kept raw and decoded in a second step -- decoding
+// straight into the success shape silently yields a blank account for the other
+// two, which is how empty ids used to reach state.
+type onboardData struct {
+	Account json.RawMessage `json:"account"`
+
+	// Counters are pointers so a body that omits them is distinguishable from
+	// one that reports zero; they are the only machine-readable hint about why
+	// a 200 produced no account record.
+	TotalAccounts   *int `json:"totalAccounts"`
+	SuccessfulCount *int `json:"successfulCount"`
+	FailedCount     *int `json:"failedCount"`
+	SkippedCount    *int `json:"skippedCount"`
+}
+
+// countsSuffix renders the onboarding tallies as a parenthesised message
+// fragment with a leading space, or "" when the response carried none.
+func (d onboardData) countsSuffix() string {
+	var parts []string
+	for _, f := range []struct {
+		name string
+		val  *int
+	}{
+		{"total", d.TotalAccounts},
+		{"successful", d.SuccessfulCount},
+		{"failed", d.FailedCount},
+		{"skipped", d.SkippedCount},
+	} {
+		if f.val != nil {
+			parts = append(parts, fmt.Sprintf("%s=%d", f.name, *f.val))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// isJSONObject reports whether raw is a JSON object, as opposed to absent,
+// null, or a scalar.
+func isJSONObject(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
+// onboardFailure is the AccountOnboardingError shape that data.account carries
+// when an onboard failed: a nested account object plus the reason. Both the real
+// onboard and the dry-run preflight have to recognise it, so it is decoded in
+// one place.
+type onboardFailure struct {
+	Account json.RawMessage `json:"account"`
+	Error   string          `json:"error"`
+}
+
+// decodeOnboardFailure reads the failure shape out of data.account. A body that
+// is not this shape simply yields a zero value.
+func decodeOnboardFailure(raw json.RawMessage) onboardFailure {
+	var failure onboardFailure
+	if err := json.Unmarshal(raw, &failure); err != nil {
+		return onboardFailure{}
+	}
+	return failure
+}
+
+// isFailureShape reports whether this is an AccountOnboardingError, told apart
+// from the success shape STRUCTURALLY -- by its nested `account` object, which
+// an AWSAccountResponse never has.
+//
+// Keying on a non-empty `error` instead would be ambiguous: an
+// AWSAccountResponse carries an `error` field of its own (the row-level error
+// column), so a successful onboard that happened to surface a stale row error
+// would be reported as a failure and the account would be left out of state
+// despite existing.
+func (f onboardFailure) isFailureShape() bool { return isJSONObject(f.Account) }
+
+// reason is the server-side reason, verbatim, or "" when none was given.
+func (f onboardFailure) reason() string { return strings.TrimSpace(f.Error) }
+
+// PreflightAWSAccount probes whether an account can be onboarded, without
+// onboarding it: POST /accounts/onboard with dryRun:true, which assumes the
+// cross-account role and stops there.
+//
+// This is a separate method rather than a flag on CreateAWSAccount for a
+// concrete reason: a dry run creates nothing, so its response carries no account
+// record id. CreateAWSAccount rejects exactly that -- an empty id is how a
+// failed onboard used to reach Terraform state -- and it must keep doing so.
+func (c *Client) PreflightAWSAccount(accountID, accountName string) error {
+	requestBody := map[string]interface{}{
+		"accountId":   accountID,
+		"accountName": accountName,
+		"dryRun":      true,
+	}
+
+	// A prism-main that actually probes answers non-2xx carrying the verbatim
+	// AWS reason; doRequest has already turned that into an error.
+	body, err := c.doRequest("POST", "/accounts/onboard", requestBody)
+	if err != nil {
+		return err
+	}
+
+	// A deployment that answers 200 for a failed probe reports it in the body
+	// instead, in the same shape the real onboard uses.
+	var data onboardData
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("failed to unmarshal preflight response: %w", err)
+	}
+	if failure := decodeOnboardFailure(data.Account); failure.isFailureShape() {
+		reason := failure.reason()
+		if reason == "" {
+			reason = "Prism reported the preflight as failed but gave no reason"
+		}
+		return errors.New(reason)
+	}
+
+	// No id is expected here: a dry run creates nothing.
+	return nil
+}
+
 func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 	// Use the onboard endpoint which does full account setup (IdP/OIDC)
 	requestBody := map[string]interface{}{
@@ -242,32 +371,77 @@ func (c *Client) CreateAWSAccount(account *AWSAccount) (*AWSAccount, error) {
 		requestBody["ownerEmails"] = account.OwnerEmails
 	}
 
+	// A backend new enough to answer non-2xx for a failed onboard is handled
+	// here: doRequest turns >=400 into an error. Older self-hosted versions
+	// answer 200 for failures, which the shape checks below catch.
 	body, err := c.doRequest("POST", "/accounts/onboard", requestBody)
 	if err != nil {
 		return nil, err
 	}
 
-	// The onboard endpoint returns a complex structure with the account nested
-	var response struct {
-		Account struct {
-			ID          string   `json:"id"`
-			AccountID   string   `json:"account_id"`
-			Name        string   `json:"name"`
-			Status      string   `json:"status"`
-			OwnerEmails []string `json:"owner_emails,omitempty"`
-		} `json:"account"`
+	var data onboardData
+	if err := json.Unmarshal(body, &data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	if len(data.Account) == 0 {
+		return nil, fmt.Errorf("onboarding AWS account %s failed: Prism returned no account in its response%s",
+			account.AccountID, data.countsSuffix())
 	}
 
-	if err := json.Unmarshal(body, &response); err != nil {
+	// Failure shape: an AccountOnboardingError. See onboardFailure for why the
+	// nested object, and not a non-empty `error`, is the discriminator -- that
+	// it cannot misfire today rests on the re-onboard path in prism-main
+	// explicitly writing error:"" before it snapshots the row, incidental
+	// behaviour in another repo that nothing here can see or hold still.
+	failure := decodeOnboardFailure(data.Account)
+	if failure.isFailureShape() {
+		// The reason still comes from `error`, verbatim.
+		reason := failure.reason()
+		if reason == "" {
+			reason = "Prism reported the onboard as failed but gave no reason"
+		}
+		return nil, fmt.Errorf("onboarding AWS account %s failed: %s", account.AccountID, reason)
+	}
+
+	// Success shape: the onboarded account record.
+	var onboarded struct {
+		ID          string   `json:"id"`
+		AccountID   string   `json:"account_id"`
+		Name        string   `json:"name"`
+		Status      string   `json:"status"`
+		OwnerEmails []string `json:"owner_emails,omitempty"`
+	}
+
+	if err := json.Unmarshal(data.Account, &onboarded); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	// Defence in depth: whatever new failure shape the backend grows, an
+	// account record with no id does not exist in Prism and must never be
+	// written to state as if it did.
+	if strings.TrimSpace(onboarded.ID) == "" {
+		// Salvage a reason if the body carried one. This is reachable when the
+		// nested account is null or a non-object, so the structural check above
+		// declined it -- and a reason from the server beats the generic message
+		// below, which is the whole point of this change.
+		//
+		// It cannot misfire on a real AWSAccountResponse carrying a stale
+		// row-level error: this branch only runs once the id is known to be
+		// empty, and a genuine account record always has one.
+		if reason := failure.reason(); reason != "" {
+			return nil, fmt.Errorf("onboarding AWS account %s failed: %s", account.AccountID, reason)
+		}
+		return nil, fmt.Errorf("onboarding AWS account %s did not complete: Prism accepted the request but returned no account record id%s. "+
+			"The account is not managed by Prism -- resolve the underlying failure and re-apply",
+			account.AccountID, data.countsSuffix())
 	}
 
 	// Convert to AWSAccount
 	result := &AWSAccount{
-		ID:          response.Account.ID,
-		AccountID:   response.Account.AccountID,
-		AccountName: response.Account.Name,
-		OwnerEmails: response.Account.OwnerEmails,
+		ID:          onboarded.ID,
+		AccountID:   onboarded.AccountID,
+		AccountName: onboarded.Name,
+		OwnerEmails: onboarded.OwnerEmails,
 	}
 
 	return result, nil
@@ -733,11 +907,144 @@ func (c *Client) GetGroupMembers(groupName string) ([]string, error) {
 type IdentityProvider struct {
 	ID          string                 `json:"id,omitempty"`
 	CustomerID  string                 `json:"customerId"`
-	Type        string                 `json:"type"` // google, microsoft, custom, keycloak
+	Type        string                 `json:"type"` // google, microsoft, custom, keycloak, saml
 	Alias       string                 `json:"alias"`
 	DisplayName string                 `json:"displayName,omitempty"`
 	Enabled     bool                   `json:"enabled"`
 	Config      map[string]interface{} `json:"config"`
+}
+
+// SAML 2.0 config keys. The names below are the JSON tags of the backend's
+// models.SAMLIdPRequest, transcribed verbatim - note nameIDPolicyFormat's capital
+// "ID", which matches Keycloak's own config key so a document imported from an
+// IdP round-trips into a create without renaming.
+//
+// displayName is deliberately absent: it is the resource's own display_name
+// attribute and is hoisted for every provider type before the type switch.
+//
+// useMetadataDescriptorUrl and descriptorCacheSeconds are deliberately not
+// exposed. The backend strips them, and exposing the switch on its own would let
+// a user turn off the pinned signing certificate - every login then trusts
+// whatever a live fetch of a customer-controlled URL returns - with no visible
+// diff in Terraform, because config is never refreshed.
+var samlStringKeys = []string{
+	// Metadata (the backend can populate the endpoints and certificate from one
+	// of these instead of having them supplied by hand).
+	"metadataUrl",
+	"metadataXml",
+	// Endpoints and trust.
+	"entityId",
+	"idpEntityId",
+	"singleSignOnServiceUrl",
+	"signingCertificate",
+	"metadataDescriptorUrl",
+	// Identity mapping.
+	"nameIDPolicyFormat",
+	"principalType",
+	"principalAttribute",
+	"emailAttributeName",
+	// Protocol options.
+	"signatureAlgorithm",
+}
+
+// samlBoolKeys are *bool on the backend: absent, true and false are three
+// distinct states, because the backend PUT is a full replace and an omitted key
+// means "leave it as it is".
+var samlBoolKeys = []string{
+	"validateSignature",
+	"wantAssertionsSigned",
+	"wantAuthnRequestsSigned",
+	"forceAuthn",
+	"postBindingResponse",
+	"postBindingAuthnRequest",
+	"enabled",
+}
+
+// samlIntKeys are *int on the backend.
+var samlIntKeys = []string{
+	"allowedClockSkew",
+}
+
+// applySAMLConfig hoists the SAML config keys onto the top level of a create or
+// update request body, which is where the backend expects them.
+//
+// Strings are written only when they are non-empty. Writing "" is never correct:
+// an empty signingCertificate means "leave the stored certificate alone", and
+// sending the empty string would clear it in Keycloak while validateSignature
+// stayed true, breaking every login.
+//
+// Booleans accept a real Go bool as well as the quoted forms "true"/"false".
+// Every other arm in this file uses a bare .(string) type assertion, which
+// silently DROPS a boolean written the natural way -
+// jsonencode({ validateSignature = true }) - producing a provider that applies
+// cleanly with signature validation never switched on. Anything that is neither
+// a bool nor parseable by strconv.ParseBool is an error naming the key.
+//
+// Integers accept float64, which is how encoding/json decodes every JSON number,
+// as well as numeric strings.
+//
+// Keys that are not recognised are ignored, consistent with the other types.
+func applySAMLConfig(body map[string]interface{}, config map[string]interface{}) error {
+	for _, key := range samlStringKeys {
+		raw, ok := config[key]
+		if !ok {
+			continue
+		}
+		value, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("identity provider config key %q must be a string, got %T", key, raw)
+		}
+		if value == "" {
+			continue
+		}
+		body[key] = value
+	}
+
+	for _, key := range samlBoolKeys {
+		raw, ok := config[key]
+		if !ok {
+			continue
+		}
+		switch value := raw.(type) {
+		case bool:
+			body[key] = value
+		case string:
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("identity provider config key %q must be a boolean (true or false), got %q", key, value)
+			}
+			body[key] = parsed
+		default:
+			return fmt.Errorf("identity provider config key %q must be a boolean (true or false), got %T", key, raw)
+		}
+	}
+
+	for _, key := range samlIntKeys {
+		raw, ok := config[key]
+		if !ok {
+			continue
+		}
+		switch value := raw.(type) {
+		case float64:
+			if value != float64(int64(value)) {
+				return fmt.Errorf("identity provider config key %q must be a whole number, got %v", key, value)
+			}
+			body[key] = int64(value)
+		case string:
+			if value == "" {
+				continue
+			}
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return fmt.Errorf("identity provider config key %q must be a whole number, got %q", key, value)
+			}
+			body[key] = parsed
+		default:
+			return fmt.Errorf("identity provider config key %q must be a whole number, got %T", key, raw)
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) CreateIdentityProvider(idpType string, idp *IdentityProvider) (*IdentityProvider, error) {
@@ -827,6 +1134,14 @@ func (c *Client) CreateIdentityProvider(idpType string, idp *IdentityProvider) (
 		}
 		if providerName, ok := idp.Config["providerName"].(string); ok {
 			requestBody["providerName"] = providerName
+		}
+
+	case "saml":
+		// SAML 2.0 (Microsoft Entra ID, Okta, Google Workspace, ADFS, ...).
+		// Typed hoist: the helper explains why a .(string) assertion is not good
+		// enough for the boolean keys.
+		if err := applySAMLConfig(requestBody, idp.Config); err != nil {
+			return nil, err
 		}
 	}
 
@@ -997,6 +1312,13 @@ func (c *Client) UpdateIdentityProvider(idpType, alias string, idp *IdentityProv
 		}
 		if providerName, ok := idp.Config["providerName"].(string); ok {
 			requestBody["providerName"] = providerName
+		}
+
+	case "saml":
+		// An empty signingCertificate is skipped rather than sent, so an update
+		// that does not restate the certificate leaves the stored one intact.
+		if err := applySAMLConfig(requestBody, idp.Config); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1277,70 +1599,218 @@ func (c *Client) ListOrgPoliciesForTarget(managementAccountID, targetID, policyT
 
 // ========== Organization Structure Operations ==========
 
-// OrgNode represents a node in the org tree (ROOT, OU, or ACCOUNT).
+// OrgNode is a single organization node as returned by POST /org/create-ou.
 type OrgNode struct {
-	ID       string     `json:"id"`
-	Name     string     `json:"name"`
-	Type     string     `json:"type"`
-	Email    string     `json:"email,omitempty"`
-	Status   string     `json:"status,omitempty"`
-	Children []*OrgNode `json:"children,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Email  string `json:"email,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
-// OrgStructure is the full organization tree response.
-type OrgStructure struct {
-	OrgID             string     `json:"org_id"`
-	ManagementAccount string     `json:"management_account"`
-	Tree              []*OrgNode `json:"tree"`
+// OrgNodeDetail is the response of POST /org/node: one node, resolved directly,
+// without walking the tree. Accounts is populated for OUs only.
+type OrgNodeDetail struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"` // "OU" or "ACCOUNT"
+	ParentID string   `json:"parent_id"`
+	Accounts []string `json:"accounts,omitempty"`
 }
 
-func (c *Client) GetOrgStructure() (*OrgStructure, error) {
-	orgPolicyMu.Lock()
-	defer orgPolicyMu.Unlock()
+// ErrOrgNodeNotFound reports that the deployment answered a structured 404 for
+// the node itself: it genuinely is not in the organization. This is the only
+// error a caller may safely treat as "gone" and drop from Terraform state.
+var ErrOrgNodeNotFound = errors.New("org node not found")
 
+// ErrOrgNodeUnsupported reports that this deployment does not implement
+// POST /org/node at all -- the request never reached a handler.
+//
+// It exists to keep that case away from ErrOrgNodeNotFound. Both arrive as a
+// 404, and conflating them would delete live OUs from state on every refresh
+// against an older deployment, which Terraform would then try to re-create.
+var ErrOrgNodeUnsupported = errors.New("this Prism deployment does not support POST /org/node")
+
+// ErrOrgNodeForbidden reports that the node exists but sits outside the caller's
+// tenant subtree. Distinct from absence: the resource must stay in state.
+var ErrOrgNodeForbidden = errors.New("org node is outside this tenant's subtree")
+
+// ErrOrgNodeInvalidID reports that the id is not a well-formed organization node
+// id -- a configuration mistake, not drift.
+var ErrOrgNodeInvalidID = errors.New("not a valid organization node id")
+
+// GetOrgNode resolves a single node -- an OU or an account -- by id.
+//
+// Server-side this is 3 AWS calls for an OU and 1 for an account. It replaced a
+// full organization traversal, which cost ~275ms per node against a throughput
+// cap of ~2.2 AWS Organizations calls/sec and timed out an ECS Envoy sidecar at
+// 15.7s on a 28-OU tree.
+//
+// Deliberately does NOT take orgPolicyMu. That mutex serializes org MUTATIONS so
+// concurrent Create/Delete/Move cannot race on the same tree; this is a pure read
+// with no shared state to guard. Holding it here serializes every prism_org_ou
+// refresh behind one global lock and defeats Terraform's parallelism entirely:
+// measured live against a 36-OU tree, `terraform plan` cost ~1.75s per managed OU
+// (2.4s for one, 14.0s for eight) instead of finishing in roughly one round.
+// An earlier revision of this cache-free path inherited the lock by convention
+// from the policy calls below -- do not reinstate it.
+func (c *Client) GetOrgNode(nodeID string) (*OrgNodeDetail, error) {
 	requestBody := map[string]interface{}{
 		"management_account_id": "",
+		"node_id":               nodeID,
 	}
 
-	body, err := c.doRequestCustomerRaw("POST", "/org/structure", requestBody)
+	body, err := c.doRequestCustomerRaw("POST", "/org/node", requestBody)
 	if err != nil {
-		return nil, err
+		return nil, classifyOrgNodeError(err)
 	}
 
-	var result OrgStructure
+	var result OrgNodeDetail
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal org structure: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal org node: %w", err)
 	}
 
 	return &result, nil
 }
 
-// findNodeInTree recursively searches for a node by ID in the org tree.
-func findNodeInTree(nodes []*OrgNode, id string) *OrgNode {
-	for _, n := range nodes {
-		if n.ID == id {
-			return n
-		}
-		if found := findNodeInTree(n.Children, id); found != nil {
-			return found
-		}
+// Machine-readable codes returned by POST /org/node. These are the positive
+// signal a caller needs before acting: a bare 404 two proxies deep says nothing
+// reliable about whether the node exists.
+const (
+	orgNodeCodeNotFound  = "ORG_NODE_NOT_FOUND"
+	orgNodeCodeForbidden = "ORG_NODE_FORBIDDEN"
+	orgNodeCodeInvalidID = "ORG_NODE_INVALID_ID"
+)
+
+// classifyOrgNodeError turns an /org/node failure into one of the sentinels, in
+// a fixed order of decreasing confidence:
+//
+//  1. the structured `code` in the error envelope -- the intended signal;
+//  2. the "ORG_NODE_NOT_FOUND:" prefix prism-ops also stamps onto the `error`
+//     string, which survives an older prism-main that drops unknown keys;
+//  3. evidence that no handler ran at all (a router's plain-text 404, a 405, or
+//     prism-main relaying a 404 from a prism-ops without the route);
+//  4. anything else -- returned as an error, never as absence.
+//
+// Removal from Terraform state requires positive evidence from step 1 or 2. A
+// 404 on its own never qualifies. The asymmetry is deliberate: a wrong
+// "unsupported" or "unrecognised" is a loud message the operator can act on,
+// while a wrong "not found" silently drops a live OU from state and has
+// Terraform try to re-create infrastructure that already exists.
+func classifyOrgNodeError(err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return err
 	}
-	return nil
+	body := strings.TrimSpace(apiErr.Body)
+
+	// 1. The structured code.
+	switch orgNodeErrorCode(apiErr.Body) {
+	case orgNodeCodeNotFound:
+		return fmt.Errorf("%w: %s", ErrOrgNodeNotFound, body)
+	case orgNodeCodeForbidden:
+		return fmt.Errorf("%w: %s", ErrOrgNodeForbidden, body)
+	case orgNodeCodeInvalidID:
+		return fmt.Errorf("%w: %s", ErrOrgNodeInvalidID, body)
+	}
+
+	// 2. The code prefixed onto the error string, for a prism-main that does not
+	// forward `code` yet. Anchored at the start on purpose: a code appearing
+	// mid-string means something re-wrapped the message, and a re-wrapped
+	// message is not evidence a handler answered.
+	if strings.HasPrefix(orgNodeErrorMessage(apiErr.Body), orgNodeCodeNotFound+":") {
+		return fmt.Errorf("%w: %s", ErrOrgNodeNotFound, body)
+	}
+
+	// 3. No handler ran.
+	switch apiErr.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		if !looksLikePrismError(apiErr.Body) {
+			// gorilla/mux falls through to http.NotFoundHandler when no route
+			// matches (prism-main registers no custom NotFoundHandler, and its
+			// middleware does not run on an unmatched route), which writes the
+			// plain text "404 page not found". An ingress error page is
+			// likewise not a Prism envelope.
+			return fmt.Errorf("%w (answered %d with a non-Prism body: %s)",
+				ErrOrgNodeUnsupported, apiErr.StatusCode, body)
+		}
+		if strings.Contains(apiErr.Body, opsNoHandlerMarker) {
+			// prism-main relayed a 404 from prism-ops, wrapped in its own
+			// envelope. It only falls back to this phrasing when the upstream
+			// body carried no "error" field -- i.e. prism-ops answered from its
+			// router, not from a handler.
+			return fmt.Errorf("%w (prism-ops relayed: %s)", ErrOrgNodeUnsupported, body)
+		}
+		// A Prism envelope, but with no ORG_NODE_* code and no prefix: this
+		// deployment predates the codes, so absence cannot be confirmed.
+		return fmt.Errorf("Prism answered %d for this org node without an ORG_NODE_* code, "+
+			"so it is not possible to tell a deleted node from a request that never reached the handler: %s. "+
+			"Upgrade prism-main and prism-ops to a version that returns the code. Nothing was removed from state",
+			apiErr.StatusCode, body)
+	}
+
+	// 4. Everything else -- a 5xx, a timeout, or a 403 without a code -- says
+	// nothing about whether the node exists.
+	return err
 }
 
-// findParentInTree finds the parent node of a given child ID.
-func findParentInTree(nodes []*OrgNode, childID string) *OrgNode {
-	for _, n := range nodes {
-		for _, c := range n.Children {
-			if c.ID == childID {
-				return n
-			}
-		}
-		if found := findParentInTree(n.Children, childID); found != nil {
-			return found
-		}
+// orgNodeErrorCode extracts the machine-readable `code` from an error envelope.
+func orgNodeErrorCode(body string) string {
+	raw := json.RawMessage(body)
+	if !isJSONObject(raw) {
+		return ""
 	}
-	return nil
+	var envelope struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(envelope.Code)
+}
+
+// orgNodeErrorMessage returns the human-readable reason from an error envelope,
+// preferring `error` (what prism-main copies the upstream reason into) over
+// `message`.
+func orgNodeErrorMessage(body string) string {
+	raw := json.RawMessage(body)
+	if !isJSONObject(raw) {
+		return ""
+	}
+	var envelope struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return ""
+	}
+	if reason := strings.TrimSpace(envelope.Error); reason != "" {
+		return reason
+	}
+	return strings.TrimSpace(envelope.Message)
+}
+
+// opsNoHandlerMarker is the prefix prism-main's extractOpsError falls back to
+// when a prism-ops response carries no "error" field -- which is what a router
+// 404 from a prism-ops that predates /org/node looks like by the time it has
+// been wrapped in prism-main's own error envelope.
+const opsNoHandlerMarker = "prism-ops returned status"
+
+// looksLikePrismError reports whether body is a Prism API error envelope, as
+// opposed to a router's plain-text 404 or an ingress error page. The `success`
+// key is the marker: models.APIResponse always carries it.
+func looksLikePrismError(body string) bool {
+	raw := json.RawMessage(body)
+	if !isJSONObject(raw) {
+		return false
+	}
+	var envelope struct {
+		Success *bool `json:"success"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return false
+	}
+	return envelope.Success != nil
 }
 
 func (c *Client) CreateOU(parentID, name string) (*OrgNode, error) {

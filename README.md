@@ -150,6 +150,21 @@ resource "prism_identity_provider" "google" {
     hostedDomain = "example.com"
   })
 }
+
+# Configure a SAML 2.0 identity provider (Microsoft Entra ID, Okta, ADFS, ...)
+#
+# Set `enabled` explicitly. Booleans inside `config` must be real HCL booleans,
+# not quoted strings.
+resource "prism_identity_provider" "entra_saml" {
+  type         = "saml"
+  display_name = "Contoso Entra ID"
+  enabled      = true
+
+  config = jsonencode({
+    metadataUrl       = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/federationmetadata/2007-06/federationmetadata.xml?appid=11111111-1111-1111-1111-111111111111"
+    validateSignature = true
+  })
+}
 ```
 
 ## Configuration
@@ -253,10 +268,10 @@ Manages group membership.
 Manages an identity provider.
 
 **Arguments:**
-- `type` (Required, String): Provider type (google, microsoft, keycloak, custom)
+- `type` (Required, String): Provider type (google, microsoft, keycloak, custom, saml). `custom` is a generic OIDC provider; `saml` is a SAML 2.0 provider such as Microsoft Entra ID, Okta or ADFS
 - `display_name` (Optional, String): Display name
 - `enabled` (Optional, Bool): Whether provider is enabled (default: true)
-- `config` (Required, String, Sensitive): JSON configuration
+- `config` (Required, String, Sensitive): JSON configuration. The accepted keys depend on `type`; see the [`prism_identity_provider` resource documentation](docs/resources/identity_provider.md) for the per-type key reference
 
 **Read-Only:**
 - `alias` (String): Auto-generated based on type (e.g., "google" for Google)

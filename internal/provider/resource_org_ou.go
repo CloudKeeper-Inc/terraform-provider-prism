@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -110,7 +111,11 @@ func (r *OrgOUResource) Create(ctx context.Context, req resource.CreateRequest, 
 			return
 		}
 		for _, acctID := range accountIDs {
-			sourceParent := r.findAccountParent(acctID)
+			sourceParent, err := r.findAccountParent(acctID)
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to look up the current parent of account %s: %s", acctID, err))
+				return
+			}
 			if sourceParent == "" {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Cannot find current parent for account %s in org tree", acctID))
 				return
@@ -134,36 +139,44 @@ func (r *OrgOUResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		return
 	}
 
-	orgTree, err := r.client.GetOrgStructure()
+	// One node, resolved directly. Walking the whole org tree to find it costs a
+	// serial AWS Organizations traversal per OU, which is what times the read
+	// out at ~15s on a 28-OU organization.
+	node, err := r.client.GetOrgNode(data.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read org structure: %s", err))
-		return
-	}
-
-	ouNode := findNodeInTree(orgTree.Tree, data.ID.ValueString())
-	if ouNode == nil {
-		resp.State.RemoveResource(ctx)
-		return
-	}
-
-	data.Name = types.StringValue(ouNode.Name)
-
-	// Find parent
-	parent := findParentInTree(orgTree.Tree, data.ID.ValueString())
-	if parent != nil {
-		data.ParentID = types.StringValue(parent.ID)
-	}
-
-	// Read child accounts
-	var childAccounts []string
-	for _, child := range ouNode.Children {
-		if child.Type == "ACCOUNT" {
-			childAccounts = append(childAccounts, child.ID)
+		switch {
+		case errors.Is(err, ErrOrgNodeNotFound):
+			// The only branch that may drop the resource: the deployment
+			// positively answered that this node is gone.
+			resp.State.RemoveResource(ctx)
+		case errors.Is(err, ErrOrgNodeUnsupported):
+			resp.Diagnostics.AddError("Prism deployment is too old",
+				fmt.Sprintf("Reading %s requires POST /org/node, which this Prism deployment does not implement: %s\n\n"+
+					"Upgrade prism-main and prism-ops, or pin the provider to a version before this one. "+
+					"The OU has NOT been removed from state.", data.ID.ValueString(), err))
+		case errors.Is(err, ErrOrgNodeForbidden):
+			resp.Diagnostics.AddError("Access denied for this OU",
+				fmt.Sprintf("%s is outside the subtree this customer may manage: %s\n\n"+
+					"The OU has NOT been removed from state.", data.ID.ValueString(), err))
+		case errors.Is(err, ErrOrgNodeInvalidID):
+			resp.Diagnostics.AddAttributeError(path.Root("id"), "Invalid OU id",
+				fmt.Sprintf("%q is not a well-formed organization node id: %s", data.ID.ValueString(), err))
+		default:
+			// Anything else -- a 403 tenant-scoping refusal, a timeout, a 5xx --
+			// says nothing about whether the OU exists, so state is left alone.
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read OU %s: %s", data.ID.ValueString(), err))
 		}
+		return
 	}
 
-	if len(childAccounts) > 0 {
-		acctSet, diags := types.SetValueFrom(ctx, types.StringType, childAccounts)
+	data.Name = types.StringValue(node.Name)
+
+	if node.ParentID != "" {
+		data.ParentID = types.StringValue(node.ParentID)
+	}
+
+	if len(node.Accounts) > 0 {
+		acctSet, diags := types.SetValueFrom(ctx, types.StringType, node.Accounts)
 		resp.Diagnostics.Append(diags...)
 		data.Accounts = acctSet
 	} else if !data.Accounts.IsNull() {
@@ -209,7 +222,11 @@ func (r *OrgOUResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// Move new accounts in
 	for _, acctID := range desiredAccounts {
 		if !currentSet[acctID] {
-			sourceParent := r.findAccountParent(acctID)
+			sourceParent, err := r.findAccountParent(acctID)
+			if err != nil {
+				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to look up the current parent of account %s: %s", acctID, err))
+				return
+			}
 			if sourceParent == "" {
 				resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Cannot find current parent for account %s", acctID))
 				return
@@ -275,15 +292,20 @@ func (r *OrgOUResource) ImportState(ctx context.Context, req resource.ImportStat
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
 }
 
-// findAccountParent looks up the current parent of an account in the org tree.
-func (r *OrgOUResource) findAccountParent(accountID string) string {
-	orgTree, err := r.client.GetOrgStructure()
+// findAccountParent looks up the current parent of an account. AWS returns an
+// account's parent directly, so this is a single call rather than a traversal.
+//
+// The three outcomes are kept distinct on purpose: ("", nil) means the lookup
+// worked and the account is genuinely not in the organization, while a non-nil
+// error means the lookup itself failed. Collapsing the second into the first is
+// what used to report a 504 as "account not found in org tree".
+func (r *OrgOUResource) findAccountParent(accountID string) (string, error) {
+	node, err := r.client.GetOrgNode(accountID)
 	if err != nil {
-		return ""
+		if errors.Is(err, ErrOrgNodeNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("unable to look up account %s in the organization: %w", accountID, err)
 	}
-	parent := findParentInTree(orgTree.Tree, accountID)
-	if parent != nil {
-		return parent.ID
-	}
-	return ""
+	return node.ParentID, nil
 }

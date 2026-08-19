@@ -9,9 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -294,28 +298,43 @@ func TestIdentityProviderImportState(t *testing.T) {
 	ctx := context.Background()
 	r := &IdentityProviderResource{}
 
-	t.Run("valid", func(t *testing.T) {
-		resp := &resource.ImportStateResponse{State: nullStateFor(ctx, t, r)}
-		r.ImportState(ctx, resource.ImportStateRequest{ID: "custom:okta"}, resp)
+	for _, tc := range []struct {
+		name     string
+		importID string
+		want     map[string]string
+	}{
+		{
+			name:     "valid custom",
+			importID: "custom:okta",
+			want:     map[string]string{"type": "custom", "alias": "okta", "id": "okta"},
+		},
+		{
+			// SAML aliases are backend-generated and carry the saml- prefix, so
+			// the alias half of the import ID contains the type as a substring.
+			name:     "valid saml",
+			importID: "saml:saml-entra-id",
+			want:     map[string]string{"type": "saml", "alias": "saml-entra-id", "id": "saml-entra-id"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &resource.ImportStateResponse{State: nullStateFor(ctx, t, r)}
+			r.ImportState(ctx, resource.ImportStateRequest{ID: tc.importID}, resp)
 
-		if resp.Diagnostics.HasError() {
-			t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
-		}
+			if resp.Diagnostics.HasError() {
+				t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+			}
 
-		for attr, want := range map[string]string{
-			"type":  "custom",
-			"alias": "okta",
-			"id":    "okta",
-		} {
-			var got string
-			if diags := resp.State.GetAttribute(ctx, path.Root(attr), &got); diags.HasError() {
-				t.Fatalf("reading %q: %v", attr, diags)
+			for attr, want := range tc.want {
+				var got string
+				if diags := resp.State.GetAttribute(ctx, path.Root(attr), &got); diags.HasError() {
+					t.Fatalf("reading %q: %v", attr, diags)
+				}
+				if got != want {
+					t.Errorf("%s = %q, want %q", attr, got, want)
+				}
 			}
-			if got != want {
-				t.Errorf("%s = %q, want %q", attr, got, want)
-			}
-		}
-	})
+		})
+	}
 
 	for _, id := range []string{"okta", "", ":okta", "custom:"} {
 		t.Run("rejects "+id, func(t *testing.T) {
@@ -324,6 +343,292 @@ func TestIdentityProviderImportState(t *testing.T) {
 
 			if !resp.Diagnostics.HasError() {
 				t.Errorf("import ID %q was accepted, want an error", id)
+			}
+		})
+	}
+}
+
+// ========== SAML 2.0 ==========
+
+const wantSAMLBasePath = "/api/v1/customers/sso/identity-providers/saml"
+
+// Every key listed in samlStringKeys, samlBoolKeys and samlIntKeys must reach the
+// top level of the create body. The expectations are built from the slices
+// themselves, so adding a key to a slice without hoisting it fails here - there
+// is no separate list to forget to update.
+func TestCreateSAMLIdentityProviderHoistsEveryConfigKey(t *testing.T) {
+	config := make(map[string]interface{})
+	want := make(map[string]interface{})
+
+	for _, key := range samlStringKeys {
+		config[key] = "value-for-" + key
+		want[key] = "value-for-" + key
+	}
+	for _, key := range samlBoolKeys {
+		config[key] = true
+		want[key] = true // decoded from JSON true, not from "true"
+	}
+	for _, key := range samlIntKeys {
+		config[key] = float64(45)
+		want[key] = float64(45) // encoding/json decodes every number as float64
+	}
+
+	c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+	})
+
+	// Enabled is false on the resource while the config carries enabled = true,
+	// so a hoisted value proves the config key is honoured.
+	_, err := c.CreateIdentityProvider("saml", &IdentityProvider{
+		DisplayName: "Contoso Entra",
+		Enabled:     false,
+		Config:      config,
+	})
+	if err != nil {
+		t.Fatalf("CreateIdentityProvider returned error: %v", err)
+	}
+
+	if len(*got) != 1 {
+		t.Fatalf("expected exactly 1 request, got %d", len(*got))
+	}
+	req := (*got)[0]
+
+	if req.Path != wantSAMLBasePath {
+		t.Errorf("request path = %q, want %q", req.Path, wantSAMLBasePath)
+	}
+	if req.Method != http.MethodPost {
+		t.Errorf("request method = %q, want POST", req.Method)
+	}
+	if _, nested := req.Body["config"]; nested {
+		t.Error("request body carries a nested config object; the backend reads these keys at the top level")
+	}
+
+	for key, wantValue := range want {
+		gotValue, ok := req.Body[key]
+		if !ok {
+			t.Errorf("config key %q never reached the request body; it is listed in a saml*Keys slice but not hoisted", key)
+			continue
+		}
+		if gotValue != wantValue {
+			t.Errorf("body[%q] = %#v (%T), want %#v (%T)", key, gotValue, gotValue, wantValue, wantValue)
+		}
+	}
+}
+
+// A boolean written the natural way - jsonencode({ validateSignature = true }) -
+// must arrive as JSON true. The .(string) assertion the other provider types use
+// would drop it silently, leaving signature validation off on a provider that
+// applied cleanly.
+func TestCreateSAMLIdentityProviderSendsRealBooleans(t *testing.T) {
+	c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+	})
+
+	_, err := c.CreateIdentityProvider("saml", &IdentityProvider{
+		DisplayName: "Contoso Entra",
+		Enabled:     true,
+		Config: map[string]interface{}{
+			"singleSignOnServiceUrl": "https://login.microsoftonline.com/tid/saml2",
+			"validateSignature":      true,    // real HCL boolean
+			"wantAssertionsSigned":   "true",  // quoted, must be coerced
+			"forceAuthn":             "false", // quoted, must be coerced
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIdentityProvider returned error: %v", err)
+	}
+
+	req := (*got)[0]
+
+	for key, want := range map[string]bool{
+		"validateSignature":    true,
+		"wantAssertionsSigned": true,
+		"forceAuthn":           false,
+	} {
+		got, ok := req.Body[key].(bool)
+		if !ok {
+			t.Errorf("body[%q] = %#v (%T), want a JSON boolean", key, req.Body[key], req.Body[key])
+			continue
+		}
+		if got != want {
+			t.Errorf("body[%q] = %v, want %v", key, got, want)
+		}
+	}
+}
+
+// Anything that is neither a boolean nor "true"/"false" is a configuration error
+// worth failing on, and it must fail before the request goes out.
+func TestCreateSAMLIdentityProviderRejectsNonBoolean(t *testing.T) {
+	c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+	})
+
+	_, err := c.CreateIdentityProvider("saml", &IdentityProvider{
+		DisplayName: "Contoso Entra",
+		Enabled:     true,
+		Config: map[string]interface{}{
+			"singleSignOnServiceUrl": "https://login.microsoftonline.com/tid/saml2",
+			"validateSignature":      "yes",
+		},
+	})
+
+	if err == nil {
+		t.Fatal("expected an error for validateSignature = \"yes\", got nil")
+	}
+	if !strings.Contains(err.Error(), "validateSignature") {
+		t.Errorf("error = %q, want it to name the offending key", err)
+	}
+	if len(*got) != 0 {
+		t.Errorf("expected no HTTP request to be sent, got %d", len(*got))
+	}
+}
+
+// An empty signingCertificate means "leave the stored certificate alone". Sending
+// "" would clear it in Keycloak while validateSignature stayed true, and every
+// login would fail.
+func TestSAMLIdentityProviderOmitsEmptySigningCertificate(t *testing.T) {
+	config := map[string]interface{}{
+		"idpEntityId":            "https://sts.windows.net/tid/",
+		"singleSignOnServiceUrl": "https://login.microsoftonline.com/tid/saml2",
+		"signingCertificate":     "",
+	}
+
+	t.Run("create", func(t *testing.T) {
+		c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+		})
+
+		if _, err := c.CreateIdentityProvider("saml", &IdentityProvider{
+			DisplayName: "Contoso Entra",
+			Enabled:     true,
+			Config:      config,
+		}); err != nil {
+			t.Fatalf("CreateIdentityProvider returned error: %v", err)
+		}
+
+		if _, present := (*got)[0].Body["signingCertificate"]; present {
+			t.Errorf("body carries signingCertificate = %#v; an empty certificate must be absent entirely",
+				(*got)[0].Body["signingCertificate"])
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+		})
+
+		if _, err := c.UpdateIdentityProvider("saml", "saml-contoso-entra-id", &IdentityProvider{
+			Alias:       "saml-contoso-entra-id",
+			DisplayName: "Contoso Entra",
+			Enabled:     true,
+			Config:      config,
+		}); err != nil {
+			t.Fatalf("UpdateIdentityProvider returned error: %v", err)
+		}
+
+		if _, present := (*got)[0].Body["signingCertificate"]; present {
+			t.Errorf("body carries signingCertificate = %#v; an empty certificate must be absent entirely",
+				(*got)[0].Body["signingCertificate"])
+		}
+	})
+}
+
+func TestUpdateSAMLIdentityProviderUsesAliasPath(t *testing.T) {
+	c, got := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeIdP(w, "saml-contoso-entra-id", "Contoso Entra", true, nil)
+	})
+
+	_, err := c.UpdateIdentityProvider("saml", "saml-contoso-entra-id", &IdentityProvider{
+		Alias:       "saml-contoso-entra-id",
+		DisplayName: "Contoso Entra",
+		Enabled:     true,
+		Config: map[string]interface{}{
+			"idpEntityId":            "https://sts.windows.net/tid/",
+			"singleSignOnServiceUrl": "https://login.microsoftonline.com/tid/saml2",
+			"signingCertificate":     "MIIC8DCCAdigAwIBAgIQ",
+			"nameIDPolicyFormat":     "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+			"allowedClockSkew":       float64(30),
+			"validateSignature":      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateIdentityProvider returned error: %v", err)
+	}
+
+	if len(*got) != 1 {
+		t.Fatalf("expected exactly 1 request, got %d", len(*got))
+	}
+	req := (*got)[0]
+
+	if want := wantSAMLBasePath + "/saml-contoso-entra-id"; req.Path != want {
+		t.Errorf("request path = %q, want %q", req.Path, want)
+	}
+	if req.Method != http.MethodPut {
+		t.Errorf("request method = %q, want PUT", req.Method)
+	}
+	if req.Body["displayName"] != "Contoso Entra" {
+		t.Errorf("body displayName = %v, want %q", req.Body["displayName"], "Contoso Entra")
+	}
+	if req.Body["signingCertificate"] != "MIIC8DCCAdigAwIBAgIQ" {
+		t.Errorf("body signingCertificate = %v, want the supplied certificate", req.Body["signingCertificate"])
+	}
+	// Capital ID: the key matches Keycloak's own config key, so a lowercase
+	// nameIdPolicyFormat would be dropped by the backend with no error.
+	if req.Body["nameIDPolicyFormat"] != "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" {
+		t.Errorf("body nameIDPolicyFormat = %v, want the persistent URN", req.Body["nameIDPolicyFormat"])
+	}
+	if req.Body["allowedClockSkew"] != float64(30) {
+		t.Errorf("body allowedClockSkew = %#v, want 30", req.Body["allowedClockSkew"])
+	}
+}
+
+// The type attribute's OneOf validator is the only thing stopping a typo from
+// reaching the API as an unknown provider type.
+func TestIdentityProviderTypeValidator(t *testing.T) {
+	ctx := context.Background()
+	r := &IdentityProviderResource{}
+
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+	if schemaResp.Diagnostics.HasError() {
+		t.Fatalf("schema returned diagnostics: %v", schemaResp.Diagnostics)
+	}
+
+	attr, ok := schemaResp.Schema.Attributes["type"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("type attribute is %T, want schema.StringAttribute", schemaResp.Schema.Attributes["type"])
+	}
+	if len(attr.Validators) == 0 {
+		t.Fatal("the type attribute has no validators; every string would be accepted")
+	}
+
+	validate := func(value string) diag.Diagnostics {
+		var diags diag.Diagnostics
+		for _, v := range attr.Validators {
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, validator.StringRequest{
+				Path:        path.Root("type"),
+				ConfigValue: types.StringValue(value),
+			}, resp)
+			diags.Append(resp.Diagnostics...)
+		}
+		return diags
+	}
+
+	for _, accepted := range []string{"google", "microsoft", "keycloak", "custom", "saml"} {
+		t.Run("accepts "+accepted, func(t *testing.T) {
+			if diags := validate(accepted); diags.HasError() {
+				t.Errorf("type = %q was rejected: %v", accepted, diags)
+			}
+		})
+	}
+
+	// The validator is case-sensitive and exact: "SAML" and "saml2" must not slip
+	// through to the API as an unknown provider type.
+	for _, rejected := range []string{"saml2", "SAML", "SAML2", "oidc", ""} {
+		t.Run("rejects "+rejected, func(t *testing.T) {
+			if diags := validate(rejected); !diags.HasError() {
+				t.Errorf("type = %q was accepted, want a diagnostic", rejected)
 			}
 		})
 	}

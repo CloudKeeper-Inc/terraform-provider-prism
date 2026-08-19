@@ -43,7 +43,8 @@ func (r *IdentityProviderResource) Metadata(ctx context.Context, req resource.Me
 
 func (r *IdentityProviderResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages an identity provider configuration in CloudKeeper. Supports Google, Microsoft Azure AD, Keycloak federation, and custom OIDC providers.",
+		MarkdownDescription: "Manages an identity provider configuration in CloudKeeper. Supports Google, Microsoft Azure AD, " +
+			"Keycloak federation, custom OIDC providers, and SAML 2.0 providers such as Microsoft Entra ID, Okta and ADFS.",
 
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -54,10 +55,11 @@ func (r *IdentityProviderResource) Schema(ctx context.Context, req resource.Sche
 				},
 			},
 			"type": schema.StringAttribute{
-				Required:            true,
-				MarkdownDescription: "The type of identity provider (google, microsoft, keycloak, custom)",
+				Required: true,
+				MarkdownDescription: "The type of identity provider (google, microsoft, keycloak, custom, saml). " +
+					"`custom` is a generic OIDC provider; `saml` is a SAML 2.0 provider.",
 				Validators: []validator.String{
-					stringvalidator.OneOf("google", "microsoft", "keycloak", "custom"),
+					stringvalidator.OneOf("google", "microsoft", "keycloak", "custom", "saml"),
 				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),

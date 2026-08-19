@@ -1,0 +1,44 @@
+---
+page_title: "{{.Name}} {{.Type}} - {{.RenderedProviderName}}"
+subcategory: ""
+description: |-
+{{ .Description | plainmarkdown | trimspace | prefixlines "  " }}
+---
+
+# {{.Name}} ({{.Type}})
+
+{{ .Description | trimspace }}
+
+{{ if .HasExample -}}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown | trimspace }}
+
+## Behavior
+
+- **Create (onboard mode, `create_new = false`)**: Registers an existing AWS account with Prism and creates the SAML and OIDC providers inside it. Before doing so, the provider preflights the account and fails without attempting the onboard if Prism cannot reach it.
+- **Create (factory mode, `create_new = true`)**: Launches the Account Factory, polls until the new account is provisioned and onboarded, then records it. Bounded by `create_timeout` (default `45m`). No preflight — the factory provisions the cross-account role itself.
+- **Read**: Looks the account up by `account_id`. If Prism no longer has it, the resource is removed from state and the next plan proposes recreating it.
+- **Update**: `account_name` and `owner_emails` can be changed in place. Changing `account_id`, `create_new`, `root_email`, `admin_role_name` or `master_account` forces replacement.
+- **Delete**: Removes the account's permission set assignments, then deletes the account record from Prism. The AWS account itself is not closed or altered.
+
+## Requirements for onboarding an existing account
+
+Prism reaches into each target account by assuming a cross-account IAM role — `CloudKeeper-SSO-Role` by default, set deployment-wide by the `AWSSwitchRoleName` stack parameter. It is not a per-resource setting and cannot be supplied from Terraform.
+
+Onboarding fails if that role is absent from the target account, if its trust policy does not name the Prism account, or if its `sts:ExternalId` condition does not match. All three surface as an `AssumeRole` failure naming the account, and the underlying AWS error is reported verbatim.
+
+~> **If the account has moved between AWS organizations**, check the role still exists. A service-managed StackSet with the default *Delete stacks* account-removal behaviour removes its stack — and the role with it — from any account that leaves the organization the StackSet targets.
+
+To check an account without changing anything, call the onboard endpoint with `"dryRun": true`. It performs the same reachability check and reports the same errors, but creates nothing.
+
+{{ if .HasImport -}}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+{{- end }}

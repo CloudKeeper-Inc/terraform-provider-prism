@@ -22,7 +22,7 @@ The management account is automatically resolved from your Prism customer config
 ## Behavior
 
 - **Create**: Creates the OU under the specified parent, then moves any listed accounts into it.
-- **Read**: Walks the organization tree to find the OU and its child accounts.
+- **Read**: Resolves the OU directly by id, returning its name, parent and child accounts. Cost is independent of the size of the organization.
 - **Update**: Only the `accounts` attribute can be updated in-place. Accounts added to the set are moved into the OU; accounts removed are moved back to the parent. Changing `name` or `parent_id` forces replacement.
 - **Delete**: Moves all managed accounts back to the parent OU, then deletes the OU. The OU must have no child OUs — delete nested OUs first.
 
