@@ -1,8 +1,8 @@
 module github.com/CloudKeeper-Inc/terraform-provider-prism/tools/terraform-import
 
-go 1.24.0
+go 1.26.0
 
-toolchain go1.24.10
+toolchain go1.26.11
 
 replace github.com/CloudKeeper-Inc/terraform-provider-prism => ../..
 
@@ -20,5 +20,5 @@ require (
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 )

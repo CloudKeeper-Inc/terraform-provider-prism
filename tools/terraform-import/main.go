@@ -368,9 +368,6 @@ func generateAWSAccountsFile(outputDir string, accounts []provider.AWSAccount) e
 		sb.WriteString(fmt.Sprintf("resource \"prism_aws_account\" \"%s\" {\n", resourceName))
 		sb.WriteString(fmt.Sprintf("  account_id   = \"%s\"\n", acc.AccountID))
 		sb.WriteString(fmt.Sprintf("  account_name = \"%s\"\n", escapeString(acc.AccountName)))
-		if acc.Region != "" {
-			sb.WriteString(fmt.Sprintf("  region       = \"%s\"\n", acc.Region))
-		}
 		sb.WriteString("}\n\n")
 	}
 
@@ -492,10 +489,6 @@ func generateGroupsFile(outputDir string, groups []provider.Group, memberships m
 		resourceName := toResourceName(group.Name)
 		sb.WriteString(fmt.Sprintf("resource \"prism_group\" \"%s\" {\n", resourceName))
 		sb.WriteString(fmt.Sprintf("  name        = \"%s\"\n", escapeString(group.Name)))
-
-		if group.Description != "" {
-			sb.WriteString(fmt.Sprintf("  description = \"%s\"\n", escapeString(group.Description)))
-		}
 
 		if group.Path != "" {
 			sb.WriteString(fmt.Sprintf("  path        = \"%s\"\n", escapeString(group.Path)))
